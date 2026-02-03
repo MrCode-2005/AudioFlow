@@ -1,0 +1,402 @@
+package com.audioflow.player.ui.library
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
+import com.audioflow.player.model.Album
+import com.audioflow.player.model.Artist
+import com.audioflow.player.model.Track
+import com.audioflow.player.ui.components.*
+import com.audioflow.player.ui.theme.*
+
+@Composable
+fun LibraryScreen(
+    onNavigateToPlayer: () -> Unit,
+    viewModel: LibraryViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val playbackState by viewModel.playbackState.collectAsState()
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(SpotifyBlack)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // Header
+            LibraryHeader()
+            
+            // Filter chips
+            FilterChipsRow(
+                selectedFilter = uiState.selectedFilter,
+                onFilterSelected = { viewModel.selectFilter(it) }
+            )
+            
+            // Content based on selected filter
+            when (uiState.selectedFilter) {
+                LibraryFilter.SONGS -> {
+                    SongsContent(
+                        tracks = uiState.tracks,
+                        onTrackClick = { viewModel.playTrack(it) },
+                        onDeleteClick = { viewModel.deleteTrack(it) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                LibraryFilter.ALBUMS -> {
+                    AlbumsGrid(
+                        albums = uiState.albums,
+                        onAlbumClick = { /* Navigate to album */ },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                LibraryFilter.ARTISTS -> {
+                    ArtistsGrid(
+                        artists = uiState.artists,
+                        onArtistClick = { /* Navigate to artist */ },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                LibraryFilter.PLAYLISTS -> {
+                    PlaylistsContent(
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+        
+        // Mini Player
+        AnimatedVisibility(
+            visible = playbackState.currentTrack != null,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it }
+        ) {
+            MiniPlayer(
+                playbackState = playbackState,
+                onPlayPauseClick = { viewModel.togglePlayPause() },
+                onNextClick = { viewModel.playNext() },
+                onClick = onNavigateToPlayer,
+                modifier = Modifier.padding(bottom = 80.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryHeader() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // User avatar
+            Surface(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape),
+                color = SpotifySurfaceVariant
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "Profile",
+                    modifier = Modifier.padding(6.dp),
+                    tint = TextPrimary
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            Text(
+                text = "Your Library",
+                style = MaterialTheme.typography.headlineMedium,
+                color = TextPrimary
+            )
+        }
+        
+        Row {
+            IconButton(onClick = { /* Search */ }) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = TextPrimary
+                )
+            }
+            IconButton(onClick = { /* Add */ }) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add",
+                    tint = TextPrimary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterChipsRow(
+    selectedFilter: LibraryFilter,
+    onFilterSelected: (LibraryFilter) -> Unit
+) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(bottom = 16.dp)
+    ) {
+        item {
+            FilterChip(
+                text = "Playlists",
+                selected = selectedFilter == LibraryFilter.PLAYLISTS,
+                onClick = { onFilterSelected(LibraryFilter.PLAYLISTS) }
+            )
+        }
+        item {
+            FilterChip(
+                text = "Artists",
+                selected = selectedFilter == LibraryFilter.ARTISTS,
+                onClick = { onFilterSelected(LibraryFilter.ARTISTS) }
+            )
+        }
+        item {
+            FilterChip(
+                text = "Albums",
+                selected = selectedFilter == LibraryFilter.ALBUMS,
+                onClick = { onFilterSelected(LibraryFilter.ALBUMS) }
+            )
+        }
+        item {
+            FilterChip(
+                text = "Songs",
+                selected = selectedFilter == LibraryFilter.SONGS,
+                onClick = { onFilterSelected(LibraryFilter.SONGS) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SongsContent(
+    tracks: List<Track>,
+    onTrackClick: (Track) -> Unit,
+    onDeleteClick: (Track) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(bottom = 140.dp)
+    ) {
+        items(tracks) { track ->
+            TrackListItem(
+                track = track,
+                onClick = { onTrackClick(track) },
+                onDeleteClick = { onDeleteClick(it) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AlbumsGrid(
+    albums: List<Album>,
+    onAlbumClick: (Album) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(albums) { album ->
+            AlbumGridItem(
+                album = album,
+                onClick = { onAlbumClick(album) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AlbumGridItem(
+    album: Album,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        AsyncImage(
+            model = album.artworkUri,
+            contentDescription = album.name,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = album.name,
+            style = MaterialTheme.typography.titleSmall,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        
+        Text(
+            text = album.artist,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun ArtistsGrid(
+    artists: List<Artist>,
+    onArtistClick: (Artist) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(artists) { artist ->
+            ArtistGridItem(
+                artist = artist,
+                onClick = { onArtistClick(artist) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ArtistGridItem(
+    artist: Artist,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(CircleShape),
+            color = SpotifySurfaceVariant
+        ) {
+            Icon(
+                imageVector = Icons.Default.Person,
+                contentDescription = artist.name,
+                modifier = Modifier.padding(32.dp),
+                tint = TextSecondary
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.titleSmall,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        
+        Text(
+            text = "Artist",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary
+        )
+    }
+}
+
+@Composable
+private fun PlaylistsContent(
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.PlaylistPlay,
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+            tint = TextSecondary
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Text(
+            text = "Create your first playlist",
+            style = MaterialTheme.typography.headlineSmall,
+            color = TextPrimary
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "It's easy, we'll help you",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Button(
+            onClick = { /* Create playlist */ },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = SpotifyGreen,
+                contentColor = SpotifyBlack
+            ),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Text("Create playlist")
+        }
+    }
+}

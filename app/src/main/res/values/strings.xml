@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AudioFlow</string>
+    
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_library">Your Library</string>
+    <string name="nav_create">Create</string>
+    
+    <!-- Player -->
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="next">Next</string>
+    <string name="previous">Previous</string>
+    <string name="shuffle">Shuffle</string>
+    <string name="repeat">Repeat</string>
+    <string name="now_playing">Now Playing</string>
+    
+    <!-- Library -->
+    <string name="artists">Artists</string>
+    <string name="songs">Songs</string>
+    <string name="albums">Albums</string>
+    <string name="playlists">Playlists</string>
+    <string name="profile">Profile</string>
+    <string name="following">Following</string>
+    
+    <!-- Search -->
+    <string name="search_hint">What do you want to listen to?</string>
+    <string name="recent_searches">Recent searches</string>
+    <string name="browse_all">Browse all</string>
+    
+    <!-- YouTube -->
+    <string name="paste_youtube_link">Paste YouTube link</string>
+    <string name="youtube_info_fetched">Video info loaded</string>
+    <string name="youtube_playback_unavailable">Direct playback is not available due to YouTube restrictions. You can open this video in the YouTube app.</string>
+    <string name="open_in_youtube">Open in YouTube</string>
+    <string name="invalid_youtube_link">Invalid YouTube link</string>
+    
+    <!-- Permissions -->
+    <string name="permission_required">Permission Required</string>
+    <string name="audio_permission_rationale">AudioFlow needs access to your music library to play local audio files.</string>
+    <string name="notification_permission_rationale">Allow notifications to see playback controls and track info.</string>
+    <string name="grant_permission">Grant Permission</string>
+    
+    <!-- General -->
+    <string name="unknown_artist">Unknown Artist</string>
+    <string name="unknown_album">Unknown Album</string>
+    <string name="no_tracks_found">No tracks found</string>
+    <string name="loading">Loading…</string>
+    <string name="error_loading">Error loading content</string>
+    <string name="cancel">Cancel</string>
+    
+    <!-- Notification -->
+    <string name="notification_channel_name">Music Playback</string>
+    <string name="notification_channel_description">Shows current playing track and controls</string>
+</resources>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary Colors - Spotify-inspired -->
+    <color name="spotify_black">#FF121212</color>
+    <color name="spotify_surface">#FF181818</color>
+    <color name="spotify_surface_variant">#FF282828</color>
+    <color name="spotify_green">#FF1DB954</color>
+    <color name="spotify_green_dark">#FF1AA34A</color>
+    
+    <!-- Text Colors -->
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#FFB3B3B3</color>
+    <color name="text_tertiary">#FF727272</color>
+    
+    <!-- UI Colors -->
+    <color name="divider">#FF282828</color>
+    <color name="card_background">#FF1E1E1E</color>
+    <color name="overlay_dark">#80000000</color>
+    
+    <!-- Status -->
+    <color name="error">#FFE53935</color>
+    <color name="success">#FF1DB954</color>
+</resources>
