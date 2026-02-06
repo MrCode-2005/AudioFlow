@@ -4,9 +4,13 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
 import android.database.Cursor
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import androidx.core.net.toUri
 import com.audioflow.player.model.Album
 import com.audioflow.player.model.Artist
 import com.audioflow.player.model.Track
@@ -14,6 +18,8 @@ import com.audioflow.player.model.TrackSource
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -23,7 +29,10 @@ class LocalMusicScanner @Inject constructor(
 ) {
     private val contentResolver: ContentResolver = context.contentResolver
     
-    private val albumArtUri = Uri.parse("content://media/external/audio/albumart")
+    // Cache directory for album art
+    private val artworkCacheDir: File by lazy {
+        File(context.cacheDir, "album_art").also { it.mkdirs() }
+    }
     
     suspend fun scanAllTracks(): List<Track> = withContext(Dispatchers.IO) {
         val tracks = mutableListOf<Track>()
@@ -42,7 +51,7 @@ class LocalMusicScanner @Inject constructor(
             MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.DATE_ADDED,
-            MediaStore.Audio.Media.DATA  // Add file path for filtering
+            MediaStore.Audio.Media.DATA  // File path for artwork extraction
         )
         
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
@@ -98,7 +107,8 @@ class LocalMusicScanner @Inject constructor(
                     id
                 )
                 
-                val artworkUri = ContentUris.withAppendedId(albumArtUri, albumId)
+                // Extract and cache embedded album art
+                val artworkUri = getOrExtractArtwork(id.toString(), filePath, albumId)
                 
                 tracks.add(
                     Track(
@@ -117,6 +127,88 @@ class LocalMusicScanner @Inject constructor(
         }
         
         tracks
+    }
+    
+    /**
+     * Extract embedded album art from audio file using MediaMetadataRetriever.
+     * Caches the result to avoid re-extraction on subsequent scans.
+     */
+    private fun getOrExtractArtwork(trackId: String, filePath: String, albumId: Long): Uri? {
+        val cacheFile = File(artworkCacheDir, "track_$trackId.jpg")
+        
+        // Return cached artwork if exists
+        if (cacheFile.exists()) {
+            return cacheFile.toUri()
+        }
+        
+        // Try to extract embedded artwork using MediaMetadataRetriever
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(filePath)
+            val embeddedArt = retriever.embeddedPicture
+            
+            if (embeddedArt != null) {
+                // Decode and save the artwork
+                val bitmap = BitmapFactory.decodeByteArray(embeddedArt, 0, embeddedArt.size)
+                if (bitmap != null) {
+                    // Scale down if too large (max 512x512) to save memory
+                    val scaledBitmap = scaleBitmap(bitmap, 512)
+                    FileOutputStream(cacheFile).use { fos ->
+                        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 85, fos)
+                    }
+                    if (scaledBitmap != bitmap) {
+                        scaledBitmap.recycle()
+                    }
+                    bitmap.recycle()
+                    return cacheFile.toUri()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Exception) {
+                // Ignore release exceptions
+            }
+        }
+        
+        // Fallback: Try the album art content URI (may work on some devices)
+        val albumArtUri = Uri.parse("content://media/external/audio/albumart")
+        val fallbackUri = ContentUris.withAppendedId(albumArtUri, albumId)
+        
+        // Check if album art exists at the URI
+        try {
+            contentResolver.openInputStream(fallbackUri)?.use {
+                return fallbackUri
+            }
+        } catch (e: Exception) {
+            // Album art not available
+        }
+        
+        return null
+    }
+    
+    /**
+     * Scale bitmap to max dimension while maintaining aspect ratio
+     */
+    private fun scaleBitmap(bitmap: Bitmap, maxDimension: Int): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        
+        if (width <= maxDimension && height <= maxDimension) {
+            return bitmap
+        }
+        
+        val ratio = minOf(
+            maxDimension.toFloat() / width,
+            maxDimension.toFloat() / height
+        )
+        
+        val newWidth = (width * ratio).toInt()
+        val newHeight = (height * ratio).toInt()
+        
+        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
     }
     
     suspend fun getAlbums(): List<Album> = withContext(Dispatchers.IO) {
@@ -150,7 +242,8 @@ class LocalMusicScanner @Inject constructor(
                 val id = cursor.getLong(idColumn)
                 val albumName = cursor.getString(albumColumn) ?: "Unknown Album"
                 
-                val artworkUri = ContentUris.withAppendedId(albumArtUri, id)
+                // Get artwork from cached track artwork or album art URI
+                val artworkUri = getAlbumArtwork(id)
                 
                 albumsMap[id.toString()] = Album(
                     id = id.toString(),
@@ -162,6 +255,31 @@ class LocalMusicScanner @Inject constructor(
         }
         
         albumsMap.values.toList()
+    }
+    
+    /**
+     * Get artwork for an album - tries cached track art first, then album art URI
+     */
+    private fun getAlbumArtwork(albumId: Long): Uri? {
+        // Check if we have any cached artwork for tracks in this album
+        val albumCacheFile = File(artworkCacheDir, "album_$albumId.jpg")
+        if (albumCacheFile.exists()) {
+            return albumCacheFile.toUri()
+        }
+        
+        // Fallback to album art content URI
+        val albumArtUri = Uri.parse("content://media/external/audio/albumart")
+        val fallbackUri = ContentUris.withAppendedId(albumArtUri, albumId)
+        
+        try {
+            contentResolver.openInputStream(fallbackUri)?.use {
+                return fallbackUri
+            }
+        } catch (e: Exception) {
+            // Album art not available
+        }
+        
+        return null
     }
     
     suspend fun getArtists(): List<Artist> = withContext(Dispatchers.IO) {
@@ -237,10 +355,23 @@ class LocalMusicScanner @Inject constructor(
                 trackId.toLong()
             )
             val rowsDeleted = contentResolver.delete(uri, null, null)
+            
+            // Also delete cached artwork
+            if (rowsDeleted > 0) {
+                File(artworkCacheDir, "track_$trackId.jpg").delete()
+            }
+            
             rowsDeleted > 0
         } catch (e: Exception) {
             e.printStackTrace()
             false
         }
+    }
+    
+    /**
+     * Clear the artwork cache (useful for forcing a refresh)
+     */
+    fun clearArtworkCache() {
+        artworkCacheDir.listFiles()?.forEach { it.delete() }
     }
 }

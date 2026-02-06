@@ -3,6 +3,7 @@ package com.audioflow.player.ui.player
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -107,12 +108,24 @@ fun NowPlayingScreen(
             
             Spacer(modifier = Modifier.height(48.dp))
             
-            // Album art - Dynamic artwork from track or YouTube thumbnail
+            // Album art with swipe gestures - Dynamic artwork from track or YouTube thumbnail
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(8.dp))
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures { change, dragAmount ->
+                            change.consume()
+                            if (dragAmount < -50) {
+                                // Swipe left -> next track
+                                viewModel.next()
+                            } else if (dragAmount > 50) {
+                                // Swipe right -> previous track
+                                viewModel.previous()
+                            }
+                        }
+                    }
             ) {
                 AsyncImage(
                     model = track?.artworkUri,

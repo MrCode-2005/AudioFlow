@@ -28,6 +28,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.audioflow.player.model.Album
 import com.audioflow.player.model.Artist
+import com.audioflow.player.model.Playlist
 import com.audioflow.player.model.Track
 import com.audioflow.player.ui.components.*
 import com.audioflow.player.ui.theme.*
@@ -40,6 +41,8 @@ fun LibraryScreen(
     val uiState by viewModel.uiState.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
     
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -49,7 +52,10 @@ fun LibraryScreen(
             modifier = Modifier.fillMaxSize()
         ) {
             // Header
-            LibraryHeader()
+            LibraryHeader(
+                showAddButton = uiState.selectedFilter == LibraryFilter.PLAYLISTS,
+                onAddClick = { showCreatePlaylistDialog = true }
+            )
             
             // Filter chips
             FilterChipsRow(
@@ -83,6 +89,10 @@ fun LibraryScreen(
                 }
                 LibraryFilter.PLAYLISTS -> {
                     PlaylistsContent(
+                        playlists = uiState.playlists,
+                        onPlaylistClick = { /* Navigate to playlist */ },
+                        onCreatePlaylistClick = { showCreatePlaylistDialog = true },
+                        onDeletePlaylistClick = { viewModel.deletePlaylist(it) },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -104,11 +114,25 @@ fun LibraryScreen(
                 modifier = Modifier.padding(bottom = 80.dp)
             )
         }
+        
+        // Create Playlist Dialog
+        if (showCreatePlaylistDialog) {
+            CreatePlaylistDialog(
+                onDismiss = { showCreatePlaylistDialog = false },
+                onConfirm = { name ->
+                    viewModel.createPlaylist(name)
+                    showCreatePlaylistDialog = false
+                }
+            )
+        }
     }
 }
 
 @Composable
-private fun LibraryHeader() {
+private fun LibraryHeader(
+    showAddButton: Boolean = true,
+    onAddClick: () -> Unit = {}
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -151,12 +175,14 @@ private fun LibraryHeader() {
                     tint = TextPrimary
                 )
             }
-            IconButton(onClick = { /* Add */ }) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add",
-                    tint = TextPrimary
-                )
+            if (showAddButton) {
+                IconButton(onClick = onAddClick) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add",
+                        tint = TextPrimary
+                    )
+                }
             }
         }
     }
@@ -354,49 +380,191 @@ private fun ArtistGridItem(
 
 @Composable
 private fun PlaylistsContent(
+    playlists: List<Playlist>,
+    onPlaylistClick: (Playlist) -> Unit,
+    onCreatePlaylistClick: () -> Unit,
+    onDeletePlaylistClick: (Playlist) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = Icons.Default.PlaylistPlay,
-            contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = TextSecondary
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Text(
-            text = "Create your first playlist",
-            style = MaterialTheme.typography.headlineSmall,
-            color = TextPrimary
-        )
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        Text(
-            text = "It's easy, we'll help you",
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Button(
-            onClick = { /* Create playlist */ },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = SpotifyGreen,
-                contentColor = SpotifyBlack
-            ),
-            shape = RoundedCornerShape(24.dp)
+    if (playlists.isEmpty()) {
+        // Empty state
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text("Create playlist")
+            Icon(
+                imageVector = Icons.Default.PlaylistPlay,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = TextSecondary
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text(
+                text = "Create your first playlist",
+                style = MaterialTheme.typography.headlineSmall,
+                color = TextPrimary
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = "It's easy, we'll help you",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Button(
+                onClick = onCreatePlaylistClick,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = SpotifyGreen,
+                    contentColor = SpotifyBlack
+                ),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Text("Create playlist")
+            }
+        }
+    } else {
+        // Playlist list
+        LazyColumn(
+            modifier = modifier,
+            contentPadding = PaddingValues(bottom = 140.dp)
+        ) {
+            items(playlists) { playlist ->
+                PlaylistListItem(
+                    playlist = playlist,
+                    onClick = { onPlaylistClick(playlist) },
+                    onDeleteClick = { onDeletePlaylistClick(playlist) }
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun PlaylistListItem(
+    playlist: Playlist,
+    onClick: () -> Unit,
+    onDeleteClick: () -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Playlist icon
+        Surface(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(4.dp)),
+            color = SpotifySurfaceVariant
+        ) {
+            Icon(
+                imageVector = Icons.Default.PlaylistPlay,
+                contentDescription = null,
+                modifier = Modifier.padding(12.dp),
+                tint = TextSecondary
+            )
+        }
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = playlist.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${playlist.trackCount} songs",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+        }
+        
+        Box {
+            IconButton(onClick = { showMenu = true }) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    tint = TextSecondary
+                )
+            }
+            
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Delete playlist") },
+                    onClick = {
+                        showMenu = false
+                        onDeleteClick()
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.Delete, contentDescription = null)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CreatePlaylistDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var playlistName by remember { mutableStateOf("") }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create playlist") },
+        text = {
+            OutlinedTextField(
+                value = playlistName,
+                onValueChange = { playlistName = it },
+                label = { Text("Playlist name") },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = SpotifyGreen,
+                    focusedLabelColor = SpotifyGreen,
+                    cursorColor = SpotifyGreen
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { 
+                    if (playlistName.isNotBlank()) {
+                        onConfirm(playlistName.trim())
+                    }
+                },
+                enabled = playlistName.isNotBlank()
+            ) {
+                Text("Create", color = if (playlistName.isNotBlank()) SpotifyGreen else TextSecondary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

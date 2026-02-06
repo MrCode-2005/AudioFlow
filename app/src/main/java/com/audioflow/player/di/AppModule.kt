@@ -2,6 +2,7 @@ package com.audioflow.player.di
 
 import android.content.Context
 import com.audioflow.player.data.local.LocalMusicScanner
+import com.audioflow.player.data.remote.YouTubeExtractor
 import com.audioflow.player.data.remote.YouTubeMetadataFetcher
 import com.audioflow.player.data.repository.MediaRepository
 import com.audioflow.player.service.PlayerController
@@ -32,11 +33,20 @@ object AppModule {
     
     @Provides
     @Singleton
+    fun provideYouTubeExtractor(
+        cookieManager: com.audioflow.player.data.remote.YouTubeCookieManager
+    ): YouTubeExtractor {
+        return YouTubeExtractor(cookieManager)
+    }
+    
+    @Provides
+    @Singleton
     fun provideMediaRepository(
         localMusicScanner: LocalMusicScanner,
-        youTubeMetadataFetcher: YouTubeMetadataFetcher
+        youTubeMetadataFetcher: YouTubeMetadataFetcher,
+        youTubeExtractor: YouTubeExtractor
     ): MediaRepository {
-        return MediaRepository(localMusicScanner, youTubeMetadataFetcher)
+        return MediaRepository(localMusicScanner, youTubeMetadataFetcher, youTubeExtractor)
     }
     
     @Provides

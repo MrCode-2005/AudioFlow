@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow HTTPS connections to YouTube API instances -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    
+    <!-- Domain configurations for API instances -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">invidious.fdn.fr</domain>
+        <domain includeSubdomains="true">inv.nadeko.net</domain>
+        <domain includeSubdomains="true">invidious.nerdvpn.de</domain>
+        <domain includeSubdomains="true">invidious.private.coffee</domain>
+        <domain includeSubdomains="true">iv.datura.network</domain>
+        <domain includeSubdomains="true">yewtu.be</domain>
+        <domain includeSubdomains="true">pipedapi.kavin.rocks</domain>
+        <domain includeSubdomains="true">pipedapi.r4fo.com</domain>
+        <domain includeSubdomains="true">pipedapi.adminforge.de</domain>
+        <domain includeSubdomains="true">img.youtube.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

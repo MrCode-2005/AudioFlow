@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.audioflow.player.data.remote.YouTubeSearchResult
 import com.audioflow.player.model.YouTubeMetadata
 import com.audioflow.player.ui.components.*
 import com.audioflow.player.ui.theme.*
@@ -58,6 +60,15 @@ fun SearchScreen(
                 modifier = Modifier.padding(16.dp)
             )
             
+            // Search Mode Toggle
+            SearchModeToggle(
+                currentMode = uiState.searchMode,
+                onModeChange = { viewModel.setSearchMode(it) },
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
             // Search Bar
             TextField(
                 value = uiState.query,
@@ -67,13 +78,19 @@ fun SearchScreen(
                     .padding(horizontal = 16.dp),
                 placeholder = {
                     Text(
-                        text = "What do you want to listen to?",
+                        text = when (uiState.searchMode) {
+                            SearchMode.LOCAL -> "Search your music library"
+                            SearchMode.YOUTUBE -> "Search YouTube for songs"
+                        },
                         color = TextTertiary
                     )
                 },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Default.Search,
+                        imageVector = when (uiState.searchMode) {
+                            SearchMode.LOCAL -> Icons.Default.Search
+                            SearchMode.YOUTUBE -> Icons.Default.PlayCircle
+                        },
                         contentDescription = "Search",
                         tint = SpotifyBlack
                     )
@@ -95,8 +112,8 @@ fun SearchScreen(
                     focusedTextColor = SpotifyBlack,
                     unfocusedTextColor = SpotifyBlack,
                     cursorColor = SpotifyBlack,
-                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
                 ),
                 shape = RoundedCornerShape(8.dp),
                 singleLine = true,
@@ -106,47 +123,58 @@ fun SearchScreen(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Search Results
-            when {
-                uiState.isSearching || uiState.isYouTubeLoading -> {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = SpotifyGreen)
+            // Content based on state
+            Box(modifier = Modifier.weight(1f)) {
+                when {
+                    uiState.isSearching || uiState.isYouTubeLoading -> {
+                        LoadingContent()
                     }
-                }
-                uiState.youtubeMetadata != null -> {
-                    YouTubeResultContent(
-                        metadata = uiState.youtubeMetadata!!,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                uiState.youtubeError != null -> {
-                    YouTubeErrorContent(
-                        error = uiState.youtubeError!!,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                uiState.hasResults -> {
-                    SearchResultsContent(
-                        uiState = uiState,
-                        onTrackClick = { viewModel.playTrack(it) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                uiState.query.isNotEmpty() -> {
-                    NoResultsContent(
-                        query = uiState.query,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                else -> {
-                    BrowseContent(
-                        modifier = Modifier.weight(1f)
-                    )
+                    uiState.isExtractingStream -> {
+                        ExtractingStreamContent()
+                    }
+                    uiState.youtubeMetadata != null -> {
+                        YouTubeMetadataContent(
+                            metadata = uiState.youtubeMetadata!!,
+                            onPlayClick = { 
+                                viewModel.playYouTubeResult(
+                                    YouTubeSearchResult(
+                                        videoId = uiState.youtubeMetadata!!.videoId,
+                                        title = uiState.youtubeMetadata!!.title,
+                                        artist = uiState.youtubeMetadata!!.author,
+                                        thumbnailUrl = uiState.youtubeMetadata!!.thumbnailUrl,
+                                        duration = uiState.youtubeMetadata!!.duration ?: 0
+                                    )
+                                )
+                            }
+                        )
+                    }
+                    uiState.youtubeError != null -> {
+                        YouTubeErrorContent(
+                            error = uiState.youtubeError!!,
+                            onDismiss = { viewModel.clearError() }
+                        )
+                    }
+                    uiState.searchMode == SearchMode.YOUTUBE && uiState.youtubeResults.isNotEmpty() -> {
+                        YouTubeSearchResultsContent(
+                            results = uiState.youtubeResults,
+                            onResultClick = { viewModel.playYouTubeResult(it) }
+                        )
+                    }
+                    uiState.searchMode == SearchMode.LOCAL && uiState.hasResults -> {
+                        LocalSearchResultsContent(
+                            uiState = uiState,
+                            onTrackClick = { viewModel.playTrack(it) }
+                        )
+                    }
+                    uiState.query.isNotEmpty() -> {
+                        NoResultsContent(
+                            query = uiState.query,
+                            searchMode = uiState.searchMode
+                        )
+                    }
+                    else -> {
+                        BrowseContent(searchMode = uiState.searchMode)
+                    }
                 }
             }
         }
@@ -170,7 +198,214 @@ fun SearchScreen(
 }
 
 @Composable
-private fun SearchResultsContent(
+private fun SearchModeToggle(
+    currentMode: SearchMode,
+    onModeChange: (SearchMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        SearchModeChip(
+            label = "Library",
+            icon = Icons.Default.LibraryMusic,
+            isSelected = currentMode == SearchMode.LOCAL,
+            onClick = { onModeChange(SearchMode.LOCAL) },
+            modifier = Modifier.weight(1f)
+        )
+        SearchModeChip(
+            label = "YouTube",
+            icon = Icons.Default.PlayCircle,
+            isSelected = currentMode == SearchMode.YOUTUBE,
+            onClick = { onModeChange(SearchMode.YOUTUBE) },
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun SearchModeChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(onClick = onClick),
+        color = if (isSelected) SpotifyGreen else SpotifySurfaceVariant,
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (isSelected) SpotifyBlack else TextSecondary
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (isSelected) SpotifyBlack else TextSecondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingContent() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(color = SpotifyGreen)
+    }
+}
+
+@Composable
+private fun ExtractingStreamContent() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            CircularProgressIndicator(color = SpotifyGreen)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Preparing audio stream...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun YouTubeSearchResultsContent(
+    results: List<YouTubeSearchResult>,
+    onResultClick: (YouTubeSearchResult) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(bottom = 140.dp)
+    ) {
+        item {
+            SectionHeader(title = "YouTube Results")
+        }
+        items(results) { result ->
+            YouTubeResultItem(
+                result = result,
+                onClick = { onResultClick(result) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun YouTubeResultItem(
+    result: YouTubeSearchResult,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Thumbnail with play icon overlay
+        Box {
+            AsyncImage(
+                model = result.thumbnailUrl,
+                contentDescription = result.title,
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop
+            )
+            // Play indicator overlay
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .background(
+                        color = Color.Black.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Play",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = result.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = ErrorRed
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = result.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (result.duration > 0) {
+                    Text(
+                        text = " • ${formatDuration(result.duration)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+            }
+        }
+        
+        Icon(
+            imageVector = Icons.Default.MoreVert,
+            contentDescription = "More options",
+            tint = TextSecondary,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+@Composable
+private fun LocalSearchResultsContent(
     uiState: SearchUiState,
     onTrackClick: (com.audioflow.player.model.Track) -> Unit,
     modifier: Modifier = Modifier
@@ -296,8 +531,9 @@ private fun AlbumResultItem(
 }
 
 @Composable
-private fun YouTubeResultContent(
+private fun YouTubeMetadataContent(
     metadata: YouTubeMetadata,
+    onPlayClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -336,40 +572,9 @@ private fun YouTubeResultContent(
         
         Spacer(modifier = Modifier.height(24.dp))
         
-        // Warning card
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = SpotifySurfaceVariant,
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.Top
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = SpotifyGreen
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Direct playback is not available due to YouTube restrictions. You can open this video in the YouTube app.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
+        // Play in app button
         Button(
-            onClick = {
-                val intent = Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("https://www.youtube.com/watch?v=${metadata.videoId}")
-                )
-                context.startActivity(intent)
-            },
+            onClick = onPlayClick,
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(
                 containerColor = SpotifyGreen,
@@ -382,6 +587,34 @@ private fun YouTubeResultContent(
                 contentDescription = null
             )
             Spacer(modifier = Modifier.width(8.dp))
+            Text("Play in AudioFlow")
+        }
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        // Open in YouTube button
+        OutlinedButton(
+            onClick = {
+                val intent = Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://www.youtube.com/watch?v=${metadata.videoId}")
+                )
+                context.startActivity(intent)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = TextPrimary
+            ),
+            border = ButtonDefaults.outlinedButtonBorder.copy(
+                brush = androidx.compose.ui.graphics.SolidColor(TextSecondary)
+            ),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.OpenInNew,
+                contentDescription = null
+            )
+            Spacer(modifier = Modifier.width(8.dp))
             Text("Open in YouTube")
         }
     }
@@ -390,6 +623,7 @@ private fun YouTubeResultContent(
 @Composable
 private fun YouTubeErrorContent(
     error: String,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -409,7 +643,7 @@ private fun YouTubeErrorContent(
         Spacer(modifier = Modifier.height(16.dp))
         
         Text(
-            text = "Invalid YouTube link",
+            text = "Something went wrong",
             style = MaterialTheme.typography.headlineSmall,
             color = TextPrimary
         )
@@ -421,12 +655,19 @@ private fun YouTubeErrorContent(
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary
         )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        TextButton(onClick = onDismiss) {
+            Text("Dismiss", color = SpotifyGreen)
+        }
     }
 }
 
 @Composable
 private fun NoResultsContent(
     query: String,
+    searchMode: SearchMode,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -454,7 +695,10 @@ private fun NoResultsContent(
         Spacer(modifier = Modifier.height(8.dp))
         
         Text(
-            text = "Try searching for something else, or paste a YouTube link",
+            text = when (searchMode) {
+                SearchMode.LOCAL -> "Try searching for something else, or switch to YouTube"
+                SearchMode.YOUTUBE -> "Try a different search term"
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary
         )
@@ -463,13 +707,17 @@ private fun NoResultsContent(
 
 @Composable
 private fun BrowseContent(
+    searchMode: SearchMode,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier.padding(16.dp)
     ) {
         Text(
-            text = "Browse all",
+            text = when (searchMode) {
+                SearchMode.LOCAL -> "Search your library"
+                SearchMode.YOUTUBE -> "Search YouTube"
+            },
             style = MaterialTheme.typography.headlineMedium,
             color = TextPrimary
         )
@@ -477,9 +725,22 @@ private fun BrowseContent(
         Spacer(modifier = Modifier.height(16.dp))
         
         Text(
-            text = "Search for songs, artists, or albums.\nYou can also paste a YouTube link to get video info.",
+            text = when (searchMode) {
+                SearchMode.LOCAL -> "Search for songs, artists, or albums from your device."
+                SearchMode.YOUTUBE -> "Search for any song on YouTube and stream it directly in the app."
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary
         )
     }
+}
+
+/**
+ * Format duration in milliseconds to mm:ss format
+ */
+private fun formatDuration(durationMs: Long): String {
+    val totalSeconds = durationMs / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
 }

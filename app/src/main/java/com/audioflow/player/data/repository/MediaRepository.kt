@@ -1,10 +1,15 @@
 package com.audioflow.player.data.repository
 
+import android.net.Uri
 import com.audioflow.player.data.local.LocalMusicScanner
+import com.audioflow.player.data.remote.YouTubeExtractor
 import com.audioflow.player.data.remote.YouTubeMetadataFetcher
+import com.audioflow.player.data.remote.YouTubeSearchResult
+import com.audioflow.player.data.remote.YouTubeStreamInfo
 import com.audioflow.player.model.Album
 import com.audioflow.player.model.Artist
 import com.audioflow.player.model.Track
+import com.audioflow.player.model.TrackSource
 import com.audioflow.player.model.YouTubeMetadata
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +20,8 @@ import javax.inject.Singleton
 @Singleton
 class MediaRepository @Inject constructor(
     private val localMusicScanner: LocalMusicScanner,
-    private val youTubeMetadataFetcher: YouTubeMetadataFetcher
+    private val youTubeMetadataFetcher: YouTubeMetadataFetcher,
+    private val youTubeExtractor: YouTubeExtractor
 ) {
     private val _tracks = MutableStateFlow<List<Track>>(emptyList())
     val tracks: Flow<List<Track>> = _tracks.asStateFlow()
@@ -90,6 +96,35 @@ class MediaRepository @Inject constructor(
     
     fun getYouTubeThumbnailUrl(videoId: String): String =
         youTubeMetadataFetcher.getThumbnailUrl(videoId)
+    
+    /**
+     * Search YouTube for videos matching the query
+     */
+    suspend fun searchYouTube(query: String): Result<List<YouTubeSearchResult>> =
+        youTubeExtractor.search(query)
+    
+    /**
+     * Extract playable audio stream URL for a YouTube video
+     */
+    suspend fun getYouTubeStreamUrl(videoId: String): Result<YouTubeStreamInfo> =
+        youTubeExtractor.extractStreamUrl(videoId)
+    
+    /**
+     * Create a Track object from YouTube stream info for playback
+     */
+    fun createTrackFromYouTube(streamInfo: YouTubeStreamInfo): Track {
+        return Track(
+            id = "yt_${streamInfo.videoId}",
+            title = streamInfo.title,
+            artist = streamInfo.artist,
+            album = "YouTube",
+            duration = streamInfo.duration,
+            artworkUri = Uri.parse(streamInfo.thumbnailUrl),
+            contentUri = Uri.parse(streamInfo.audioStreamUrl),
+            source = TrackSource.YOUTUBE,
+            dateAdded = System.currentTimeMillis()
+        )
+    }
     
     // Delete track from device
     suspend fun deleteTrack(trackId: String): Boolean {

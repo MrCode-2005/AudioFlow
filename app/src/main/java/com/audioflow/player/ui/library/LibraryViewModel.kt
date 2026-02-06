@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.audioflow.player.data.repository.MediaRepository
 import com.audioflow.player.model.Album
 import com.audioflow.player.model.Artist
+import com.audioflow.player.model.Playlist
 import com.audioflow.player.model.Track
 import com.audioflow.player.service.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 enum class LibraryFilter {
@@ -23,6 +25,7 @@ data class LibraryUiState(
     val tracks: List<Track> = emptyList(),
     val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
+    val playlists: List<Playlist> = emptyList(),
     val isLoading: Boolean = false
 )
 
@@ -46,8 +49,7 @@ class LibraryViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true)
             mediaRepository.refreshLocalMusic()
             
-            _uiState.value = LibraryUiState(
-                selectedFilter = _uiState.value.selectedFilter,
+            _uiState.value = _uiState.value.copy(
                 tracks = mediaRepository.getAllTracks(),
                 albums = mediaRepository.getAllAlbums(),
                 artists = mediaRepository.getAllArtists(),
@@ -86,5 +88,46 @@ class LibraryViewModel @Inject constructor(
                 loadLibrary()
             }
         }
+    }
+    
+    // Playlist Management
+    fun createPlaylist(name: String) {
+        val newPlaylist = Playlist(
+            id = UUID.randomUUID().toString(),
+            name = name,
+            description = "",
+            tracks = emptyList()
+        )
+        _uiState.value = _uiState.value.copy(
+            playlists = _uiState.value.playlists + newPlaylist
+        )
+    }
+    
+    fun deletePlaylist(playlist: Playlist) {
+        _uiState.value = _uiState.value.copy(
+            playlists = _uiState.value.playlists.filter { it.id != playlist.id }
+        )
+    }
+    
+    fun addTrackToPlaylist(track: Track, playlist: Playlist) {
+        val updatedPlaylist = playlist.copy(
+            tracks = playlist.tracks + track
+        )
+        _uiState.value = _uiState.value.copy(
+            playlists = _uiState.value.playlists.map { 
+                if (it.id == playlist.id) updatedPlaylist else it 
+            }
+        )
+    }
+    
+    fun removeTrackFromPlaylist(track: Track, playlist: Playlist) {
+        val updatedPlaylist = playlist.copy(
+            tracks = playlist.tracks.filter { it.id != track.id }
+        )
+        _uiState.value = _uiState.value.copy(
+            playlists = _uiState.value.playlists.map { 
+                if (it.id == playlist.id) updatedPlaylist else it 
+            }
+        )
     }
 }

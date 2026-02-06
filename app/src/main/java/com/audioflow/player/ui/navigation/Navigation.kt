@@ -18,6 +18,8 @@ import com.audioflow.player.ui.home.HomeScreen
 import com.audioflow.player.ui.library.LibraryScreen
 import com.audioflow.player.ui.player.NowPlayingScreen
 import com.audioflow.player.ui.search.SearchScreen
+import com.audioflow.player.ui.settings.SettingsScreen
+import com.audioflow.player.ui.settings.YouTubeLoginScreen
 import com.audioflow.player.ui.theme.*
 
 sealed class Screen(
@@ -52,6 +54,20 @@ sealed class Screen(
         title = "Now Playing",
         selectedIcon = Icons.Filled.PlayCircle,
         unselectedIcon = Icons.Outlined.PlayCircle
+    )
+    
+    data object Settings : Screen(
+        route = "settings",
+        title = "Settings",
+        selectedIcon = Icons.Filled.Settings,
+        unselectedIcon = Icons.Outlined.Settings
+    )
+    
+    data object YouTubeLogin : Screen(
+        route = "youtube_login",
+        title = "YouTube Login",
+        selectedIcon = Icons.Filled.Login,
+        unselectedIcon = Icons.Outlined.Lock
     )
 }
 
@@ -121,6 +137,9 @@ fun AudioFlowNavigation() {
                     onTrackClick = { /* Already playing from HomeScreen */ },
                     onNavigateToPlayer = {
                         navController.navigate(Screen.NowPlaying.route)
+                    },
+                    onNavigateToSettings = {
+                        navController.navigate(Screen.Settings.route)
                     }
                 )
             }
@@ -144,6 +163,28 @@ fun AudioFlowNavigation() {
             composable(Screen.NowPlaying.route) {
                 NowPlayingScreen(
                     onNavigateBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+            
+            composable(Screen.Settings.route) {
+                SettingsScreen(
+                    onBack = {
+                        navController.popBackStack()
+                    },
+                    onConnectYouTube = {
+                        navController.navigate(Screen.YouTubeLogin.route)
+                    }
+                )
+            }
+            
+            composable(Screen.YouTubeLogin.route) {
+                YouTubeLoginScreen(
+                    onLoginSuccess = {
+                        navController.popBackStack(Screen.Settings.route, false)
+                    },
+                    onBack = {
                         navController.popBackStack()
                     }
                 )

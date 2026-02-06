@@ -21,6 +21,11 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+        
+        // NDK ABI filters for youtubedl-android native libraries
+        ndk {
+            abiFilters += listOf("x86", "x86_64", "armeabi-v7a", "arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -101,6 +106,23 @@ dependencies {
     // Accompanist
     implementation(libs.accompanist.permissions)
     implementation(libs.accompanist.systemuicontroller)
+
+
+    // OkHttp for YouTube API requests and streaming
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    
+    // Security for encrypted cookie storage
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    
+    // WebView for YouTube login
+    implementation("androidx.webkit:webkit:1.9.0")
+    
+    // yt-dlp Android wrapper for YouTube search and extraction
+    val youtubedlAndroid = "0.18.1"
+    implementation("io.github.junkfood02.youtubedl-android:library:$youtubedlAndroid")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlAndroid")
+
 
     // Testing
     testImplementation(libs.junit)

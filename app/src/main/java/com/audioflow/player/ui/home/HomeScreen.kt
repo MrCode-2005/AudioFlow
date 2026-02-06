@@ -33,6 +33,7 @@ import com.audioflow.player.ui.theme.*
 fun HomeScreen(
     onTrackClick: (Track) -> Unit,
     onNavigateToPlayer: () -> Unit,
+    onNavigateToSettings: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -54,9 +55,14 @@ fun HomeScreen(
                 color = SpotifyGreen
             )
         } else if (uiState.allTracks.isEmpty()) {
-            EmptyStateContent(
-                onRefresh = { viewModel.loadMusic() }
-            )
+            Column(modifier = Modifier.fillMaxSize()) {
+                HomeHeader(onNavigateToSettings = onNavigateToSettings)
+                Box(modifier = Modifier.weight(1f)) {
+                    EmptyStateContent(
+                        onRefresh = { viewModel.loadMusic() }
+                    )
+                }
+            }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -64,7 +70,7 @@ fun HomeScreen(
             ) {
                 // Header
                 item {
-                    HomeHeader()
+                    HomeHeader(onNavigateToSettings = onNavigateToSettings)
                 }
                 
                 // Recent Albums
@@ -145,7 +151,9 @@ fun HomeScreen(
 }
 
 @Composable
-private fun HomeHeader() {
+private fun HomeHeader(
+    onNavigateToSettings: () -> Unit = {}
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -176,7 +184,7 @@ private fun HomeHeader() {
                 )
             }
             
-            IconButton(onClick = { /* Settings */ }) {
+            IconButton(onClick = onNavigateToSettings) {
                 Icon(
                     imageVector = Icons.Default.Settings,
                     contentDescription = "Settings",
