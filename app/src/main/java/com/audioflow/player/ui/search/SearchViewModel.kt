@@ -29,7 +29,7 @@ enum class SearchMode {
 
 data class SearchUiState(
     val query: String = "",
-    val searchMode: SearchMode = SearchMode.LOCAL,
+    val searchMode: SearchMode = SearchMode.YOUTUBE,
     // Local results
     val tracks: List<Track> = emptyList(),
     val albums: List<Album> = emptyList(),
