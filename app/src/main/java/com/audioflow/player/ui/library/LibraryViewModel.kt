@@ -80,14 +80,23 @@ class LibraryViewModel @Inject constructor(
     fun loadLibrary() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
-            mediaRepository.refreshLocalMusic()
-            
-            _uiState.value = _uiState.value.copy(
-                tracks = mediaRepository.getAllTracks(),
-                albums = mediaRepository.getAllAlbums(),
-                artists = mediaRepository.getAllArtists(),
-                isLoading = false
-            )
+            try {
+                mediaRepository.refreshLocalMusic()
+                
+                _uiState.value = _uiState.value.copy(
+                    tracks = mediaRepository.getAllTracks(),
+                    albums = mediaRepository.getAllAlbums(),
+                    artists = mediaRepository.getAllArtists(),
+                    isLoading = false
+                )
+            } catch (e: Exception) {
+                // Handle error gracefully
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false
+                    // We could expose an error state here if needed
+                )
+                e.printStackTrace()
+            }
         }
     }
     

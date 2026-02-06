@@ -44,6 +44,10 @@ class MediaRepository @Inject constructor(
             _tracks.value = localMusicScanner.scanAllTracks()
             _albums.value = localMusicScanner.getAlbums()
             _artists.value = localMusicScanner.getArtists()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // If scanning fails, we keep empty lists or previous state
+            // and maybe trigger an error state if possible
         } finally {
             _isLoading.value = false
         }
