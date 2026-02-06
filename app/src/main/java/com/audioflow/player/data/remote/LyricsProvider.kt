@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -12,9 +13,13 @@ import javax.inject.Singleton
  * Provides song lyrics from external APIs
  */
 @Singleton
-class LyricsProvider @Inject constructor(
-    private val okHttpClient: OkHttpClient
-) {
+class LyricsProvider @Inject constructor() {
+    
+    private val okHttpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
+    
     companion object {
         // Free lyrics API (lrclib.net)
         private const val LRCLIB_API = "https://lrclib.net/api/get"
