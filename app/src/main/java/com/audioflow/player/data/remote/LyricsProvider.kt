@@ -31,50 +31,100 @@ class LyricsProvider @Inject constructor() {
      */
     suspend fun getLyrics(title: String, artist: String, duration: Long? = null): Result<LyricsResult> {
         return withContext(Dispatchers.IO) {
-            try {
-                // Build URL with query params
-                val urlBuilder = StringBuilder(LRCLIB_API)
-                    .append("?track_name=").append(java.net.URLEncoder.encode(title, "UTF-8"))
-                    .append("&artist_name=").append(java.net.URLEncoder.encode(artist, "UTF-8"))
-                
-                duration?.let {
-                    val durationSeconds = it / 1000
-                    urlBuilder.append("&duration=").append(durationSeconds)
-                }
-                
-                val request = Request.Builder()
-                    .url(urlBuilder.toString())
-                    .header("User-Agent", "AudioFlow/1.0")
-                    .get()
-                    .build()
-                
-                val response = okHttpClient.newCall(request).execute()
-                
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("Lyrics not found"))
-                }
-                
-                val body = response.body?.string() ?: return@withContext Result.failure(Exception("Empty response"))
-                val json = JSONObject(body)
-                
-                val plainLyrics = json.optString("plainLyrics", null)
-                val syncedLyrics = json.optString("syncedLyrics", null)
-                
-                if (plainLyrics.isNullOrBlank() && syncedLyrics.isNullOrBlank()) {
-                    return@withContext Result.failure(Exception("No lyrics available"))
-                }
-                
-                // Parse synced lyrics if available
-                val syncedLines = syncedLyrics?.let { parseSyncedLyrics(it) }
-                
-                Result.success(LyricsResult(
-                    plainText = plainLyrics ?: syncedLyrics?.replace(Regex("\\[\\d+:\\d+\\.\\d+\\]"), "")?.trim() ?: "",
-                    syncedLines = syncedLines
-                ))
-                
-            } catch (e: Exception) {
-                Result.failure(e)
+            // Try with cleaned title first
+            val cleanTitle = cleanSongTitle(title)
+            val cleanArtist = cleanArtistName(artist)
+            
+            // Try exact match first
+            var result = fetchLyricsFromApi(cleanTitle, cleanArtist, duration)
+            
+            // If failed, try without duration (more lenient)
+            if (result.isFailure && duration != null) {
+                result = fetchLyricsFromApi(cleanTitle, cleanArtist, null)
             }
+            
+            // If still failed, try with original title but no duration
+            if (result.isFailure) {
+                result = fetchLyricsFromApi(title, artist, null)
+            }
+            
+            result
+        }
+    }
+    
+    /**
+     * Clean song title by removing common YouTube video suffixes
+     */
+    private fun cleanSongTitle(title: String): String {
+        return title
+            .replace(Regex("\\s*\\(Official\\s*(Video|Audio|Music Video|Lyric Video|Visualizer)\\)\\s*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*\\[Official\\s*(Video|Audio|Music Video|Lyric Video|Visualizer)\\]\\s*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*-\\s*Official\\s*(Video|Audio)\\s*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*\\|\\s*Official\\s*(Video|Audio)\\s*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*ft\\.?\\s*", RegexOption.IGNORE_CASE), " feat. ")
+            .replace(Regex("\\s*feat\\.?\\s*", RegexOption.IGNORE_CASE), " feat. ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+    
+    /**
+     * Clean artist name
+     */
+    private fun cleanArtistName(artist: String): String {
+        return artist
+            .replace(Regex("\\s*-\\s*Topic$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*VEVO$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+    
+    /**
+     * Actual API call to fetch lyrics
+     */
+    private fun fetchLyricsFromApi(title: String, artist: String, duration: Long?): Result<LyricsResult> {
+        return try {
+            // Build URL with query params
+            val urlBuilder = StringBuilder(LRCLIB_API)
+                .append("?track_name=").append(java.net.URLEncoder.encode(title, "UTF-8"))
+                .append("&artist_name=").append(java.net.URLEncoder.encode(artist, "UTF-8"))
+            
+            duration?.let {
+                val durationSeconds = it / 1000
+                urlBuilder.append("&duration=").append(durationSeconds)
+            }
+            
+            val request = Request.Builder()
+                .url(urlBuilder.toString())
+                .header("User-Agent", "AudioFlow/1.0")
+                .get()
+                .build()
+            
+            val response = okHttpClient.newCall(request).execute()
+            
+            if (!response.isSuccessful) {
+                return Result.failure(Exception("Lyrics not found"))
+            }
+            
+            val body = response.body?.string() ?: return Result.failure(Exception("Empty response"))
+            val json = JSONObject(body)
+            
+            val plainLyrics = json.optString("plainLyrics", null)
+            val syncedLyrics = json.optString("syncedLyrics", null)
+            
+            if (plainLyrics.isNullOrBlank() && syncedLyrics.isNullOrBlank()) {
+                return Result.failure(Exception("No lyrics available"))
+            }
+            
+            // Parse synced lyrics if available
+            val syncedLines = syncedLyrics?.let { parseSyncedLyrics(it) }
+            
+            Result.success(LyricsResult(
+                plainText = plainLyrics ?: syncedLyrics?.replace(Regex("\\[\\d+:\\d+\\.\\d+\\]"), "")?.trim() ?: "",
+                syncedLines = syncedLines
+            ))
+            
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
     

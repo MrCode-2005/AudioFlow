@@ -44,16 +44,19 @@ object AppModule {
     fun provideMediaRepository(
         localMusicScanner: LocalMusicScanner,
         youTubeMetadataFetcher: YouTubeMetadataFetcher,
-        youTubeExtractor: YouTubeExtractor
+        youTubeExtractor: YouTubeExtractor,
+        trackMetadataManager: com.audioflow.player.data.local.TrackMetadataManager
     ): MediaRepository {
-        return MediaRepository(localMusicScanner, youTubeMetadataFetcher, youTubeExtractor)
+        return MediaRepository(localMusicScanner, youTubeMetadataFetcher, youTubeExtractor, trackMetadataManager)
     }
     
     @Provides
     @Singleton
     fun providePlayerController(
-        @ApplicationContext context: Context
+        @ApplicationContext context: Context,
+        mediaRepository: MediaRepository,
+        recentlyPlayedManager: com.audioflow.player.data.local.RecentlyPlayedManager
     ): PlayerController {
-        return PlayerController(context)
+        return PlayerController(context, mediaRepository, recentlyPlayedManager)
     }
 }

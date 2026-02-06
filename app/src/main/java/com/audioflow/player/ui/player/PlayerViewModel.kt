@@ -3,6 +3,7 @@ package com.audioflow.player.ui.player
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.audioflow.player.data.local.LikedSongsManager
+import com.audioflow.player.data.local.PlaylistManager
 import com.audioflow.player.data.remote.LyricsProvider
 import com.audioflow.player.data.remote.LyricsResult
 import com.audioflow.player.service.PlayerController
@@ -26,12 +27,17 @@ enum class LikeButtonState {
 class PlayerViewModel @Inject constructor(
     private val playerController: PlayerController,
     private val likedSongsManager: LikedSongsManager,
+    private val playlistManager: PlaylistManager,
     private val lyricsProvider: LyricsProvider,
     private val youTubeExtractor: com.audioflow.player.data.remote.YouTubeExtractor
 ) : ViewModel() {
     
     val playbackState = playerController.playbackState
     val likedSongIds = likedSongsManager.likedSongIds
+    val playlists = playlistManager.playlists
+    
+    private val _showNewPlaylistDialog = MutableStateFlow(false)
+    val showNewPlaylistDialog: StateFlow<Boolean> = _showNewPlaylistDialog.asStateFlow()
     
     private val _showPlaylistSheet = MutableStateFlow(false)
     val showPlaylistSheet: StateFlow<Boolean> = _showPlaylistSheet.asStateFlow()
@@ -50,6 +56,14 @@ class PlayerViewModel @Inject constructor(
     val isLoadingVideo: StateFlow<Boolean> = _isLoadingVideo.asStateFlow()
     
     private var lastFetchedTrackId: String? = null
+    
+    // Options sheet state
+    private val _showOptionsSheet = MutableStateFlow(false)
+    val showOptionsSheet: StateFlow<Boolean> = _showOptionsSheet.asStateFlow()
+    
+    // Lyrics visibility preference (default: on)
+    private val _lyricsEnabled = MutableStateFlow(true)
+    val lyricsEnabled: StateFlow<Boolean> = _lyricsEnabled.asStateFlow()
     
     init {
         // Auto-fetch lyrics and video when track changes
@@ -166,5 +180,80 @@ class PlayerViewModel @Inject constructor(
     
     fun cycleRepeatMode() {
         playerController.cycleRepeatMode()
+    }
+    
+    // Options sheet management
+    fun showOptionsSheet() {
+        _showOptionsSheet.value = true
+    }
+    
+    fun dismissOptionsSheet() {
+        _showOptionsSheet.value = false
+    }
+    
+    fun toggleLyrics() {
+        _lyricsEnabled.value = !_lyricsEnabled.value
+    }
+    
+    // Stub methods for future features
+    fun goToArtist() {
+        // TODO: Navigate to artist screen
+        _showOptionsSheet.value = false
+    }
+    
+    fun goToAlbum() {
+        // TODO: Navigate to album screen
+        _showOptionsSheet.value = false
+    }
+    
+    fun viewCredits() {
+        // TODO: Show credits dialog
+        _showOptionsSheet.value = false
+    }
+    
+    fun openSleepTimer() {
+        // TODO: Open sleep timer dialog
+        _showOptionsSheet.value = false
+    }
+    
+    fun openEqualizer() {
+        // TODO: Open equalizer screen
+        _showOptionsSheet.value = false
+    }
+    
+    // Playlist management
+    fun showCreatePlaylistDialog() {
+        _showNewPlaylistDialog.value = true
+    }
+    
+    fun hideCreatePlaylistDialog() {
+        _showNewPlaylistDialog.value = false
+    }
+    
+    fun createNewPlaylist(name: String) {
+        if (name.isNotBlank()) {
+            playlistManager.createPlaylist(name)
+            // Optionally add current track to the new playlist
+            playbackState.value.currentTrack?.id?.let { trackId ->
+                val newPlaylist = playlistManager.playlists.value.lastOrNull()
+                newPlaylist?.let {
+                    playlistManager.addToPlaylist(it.id, trackId)
+                }
+            }
+        }
+        _showNewPlaylistDialog.value = false
+        _showPlaylistSheet.value = false
+    }
+    
+    fun addToPlaylist(playlistId: String) {
+        playbackState.value.currentTrack?.id?.let { trackId ->
+            playlistManager.addToPlaylist(playlistId, trackId)
+        }
+        _showPlaylistSheet.value = false
+    }
+    
+    fun createNewFolder() {
+        playlistManager.createPlaylist("New Folder", isFolder = true)
+        _showPlaylistSheet.value = false
     }
 }

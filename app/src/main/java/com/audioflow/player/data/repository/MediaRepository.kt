@@ -21,10 +21,13 @@ import javax.inject.Singleton
 class MediaRepository @Inject constructor(
     private val localMusicScanner: LocalMusicScanner,
     private val youTubeMetadataFetcher: YouTubeMetadataFetcher,
-    private val youTubeExtractor: YouTubeExtractor
+    private val youTubeExtractor: YouTubeExtractor,
+    private val trackMetadataManager: com.audioflow.player.data.local.TrackMetadataManager
 ) {
     private val _tracks = MutableStateFlow<List<Track>>(emptyList())
     val tracks: Flow<List<Track>> = _tracks.asStateFlow()
+    
+    // ... existing defined flows ...
     
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     val albums: Flow<List<Album>> = _albums.asStateFlow()
@@ -52,7 +55,12 @@ class MediaRepository @Inject constructor(
     
     fun getAllArtists(): List<Artist> = _artists.value
     
-    fun getTrackById(id: String): Track? = _tracks.value.find { it.id == id }
+    fun getTrackById(id: String): Track? {
+        // Try local tracks first
+        return _tracks.value.find { it.id == id } 
+            // Fallback to cached remote tracks
+            ?: trackMetadataManager.getTrack(id)
+    }
     
     fun getAlbumById(id: String): Album? = _albums.value.find { it.id == id }
     

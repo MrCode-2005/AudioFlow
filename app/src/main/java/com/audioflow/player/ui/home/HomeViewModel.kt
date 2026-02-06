@@ -2,6 +2,8 @@ package com.audioflow.player.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.audioflow.player.data.local.RecentlyPlayedManager
+import com.audioflow.player.data.local.RecentlyPlayedSong
 import com.audioflow.player.data.repository.MediaRepository
 import com.audioflow.player.model.Album
 import com.audioflow.player.model.Track
@@ -18,19 +20,24 @@ data class HomeUiState(
     val recentAlbums: List<Album> = emptyList(),
     val allTracks: List<Track> = emptyList(),
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val isDynamicMode: Boolean = false // Toggle between local and dynamic content
 )
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
-    private val playerController: PlayerController
+    private val playerController: PlayerController,
+    private val recentlyPlayedManager: RecentlyPlayedManager
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
     
     val playbackState = playerController.playbackState
+    
+    // Recently played songs from manager (for dynamic mode)
+    val recentlyPlayedSongs: StateFlow<List<RecentlyPlayedSong>> = recentlyPlayedManager.recentSongs
     
     // Don't auto-load on init - wait for permission and explicit call
     // init {
@@ -78,5 +85,14 @@ class HomeViewModel @Inject constructor(
     
     fun playNext() {
         playerController.next()
+    }
+    
+    /**
+     * Toggle between local content and dynamic/online content
+     */
+    fun toggleContentMode() {
+        _uiState.value = _uiState.value.copy(
+            isDynamicMode = !_uiState.value.isDynamicMode
+        )
     }
 }

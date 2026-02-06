@@ -10,6 +10,8 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.audioflow.player.data.remote.YouTubeSearchResult
+import com.audioflow.player.data.repository.MediaRepository
 import com.audioflow.player.model.PlaybackState
 import com.audioflow.player.model.RepeatMode
 import com.audioflow.player.model.Track
@@ -27,12 +29,15 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.audioflow.player.data.local.RecentlyPlayedManager
 
 private const val TAG = "PlayerController"
 
 @Singleton
 class PlayerController @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val mediaRepository: MediaRepository,
+    private val recentlyPlayedManager: RecentlyPlayedManager
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
@@ -47,6 +52,21 @@ class PlayerController @Inject constructor(
     
     private var currentQueue: List<Track> = emptyList()
     private var isControllerReady = false
+    
+    // YouTube search results queue for next/previous navigation
+    private var youTubeQueue: List<YouTubeSearchResult> = emptyList()
+    private var youTubeQueueIndex: Int = -1
+    
+    // Playlist queue for mixed/remote tracks that need lazy loading
+    private var playlistQueue: List<Track> = emptyList()
+    private var playlistQueueIndex: Int = -1
+    
+    private var isExtractingStream: Boolean = false
+    
+    // Cache for extracted stream URLs to avoid re-extraction
+    private val streamUrlCache = mutableMapOf<String, CachedStreamUrl>()
+    private data class CachedStreamUrl(val url: String, val timestamp: Long)
+    private val CACHE_DURATION_MS = 5 * 60 * 1000L // 5 minutes
     
     init {
         // Initialize immediately
@@ -77,6 +97,144 @@ class PlayerController @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize controller: ${e.message}")
             e.printStackTrace()
+        }
+    }
+
+    /**
+     * Play a playlist with support for lazy-loading remote tracks
+     */
+    fun playPlaylist(tracks: List<Track>, startIndex: Int = 0) {
+        Log.d(TAG, "playPlaylist() called with ${tracks.size} tracks, startIndex: $startIndex")
+        
+        // Clear YouTube queue to avoid confusion
+        clearYouTubeQueue()
+        playlistQueue = tracks
+        playlistQueueIndex = startIndex
+        
+        playPlaylistQueueItem(startIndex)
+    }
+    
+    private fun playPlaylistQueueItem(index: Int) {
+        if (index < 0 || index >= playlistQueue.size || isExtractingStream) return
+        
+        val track = playlistQueue[index]
+        playlistQueueIndex = index
+        Log.d(TAG, "Playing playlist item: ${track.title}, URI: ${track.contentUri}")
+        
+        // Check if this is a YouTube track that needs extraction
+        val needsExtraction = track.source == com.audioflow.player.model.TrackSource.YOUTUBE && 
+            (track.contentUri.toString().startsWith("yt_stream") || !track.contentUri.toString().startsWith("http"))
+            
+        if (needsExtraction) {
+            val videoId = track.id.removePrefix("yt_")
+            
+            // Check cache first
+            val cached = streamUrlCache[videoId]
+            if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_DURATION_MS) {
+                Log.d(TAG, "Using cached stream URL for $videoId")
+                val cachedTrack = track.copy(contentUri = Uri.parse(cached.url))
+                playSingleTrackInternal(cachedTrack)
+                prefetchNextTrack(index)
+                return
+            }
+            
+            Log.d(TAG, "Track needs extraction. Extracting stream...")
+            isExtractingStream = true
+            
+            scope.launch {
+                mediaRepository.getYouTubeStreamUrl(videoId)
+                    .onSuccess { streamInfo ->
+                        // Cache the URL
+                        streamUrlCache[videoId] = CachedStreamUrl(
+                            url = streamInfo.audioStreamUrl,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        
+                        val playableTrack = mediaRepository.createTrackFromYouTube(streamInfo)
+                        playSingleTrackInternal(playableTrack)
+                        isExtractingStream = false
+                        
+                        // Prefetch next track
+                        prefetchNextTrack(index)
+                    }
+                    .onFailure { error ->
+                        Log.e(TAG, "Failed to extract stream: ${error.message}")
+                        _error.value = "Failed to play: ${error.message}"
+                        isExtractingStream = false
+                    }
+            }
+        } else {
+            // Local track or already valid
+            playSingleTrackInternal(track)
+            prefetchNextTrack(index)
+        }
+    }
+    
+    private fun prefetchNextTrack(currentIndex: Int) {
+        val nextIndex = currentIndex + 1
+        if (nextIndex >= playlistQueue.size) return
+        
+        val nextTrack = playlistQueue[nextIndex]
+        val needsExtraction = nextTrack.source == com.audioflow.player.model.TrackSource.YOUTUBE && 
+            (nextTrack.contentUri.toString().startsWith("yt_stream") || !nextTrack.contentUri.toString().startsWith("http"))
+        
+        if (!needsExtraction) return
+        
+        val videoId = nextTrack.id.removePrefix("yt_")
+        val cached = streamUrlCache[videoId]
+        if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_DURATION_MS) {
+            return // Already cached
+        }
+        
+        Log.d(TAG, "Prefetching next track: ${nextTrack.title}")
+        scope.launch {
+            mediaRepository.getYouTubeStreamUrl(videoId)
+                .onSuccess { streamInfo ->
+                    streamUrlCache[videoId] = CachedStreamUrl(
+                        url = streamInfo.audioStreamUrl,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    Log.d(TAG, "Prefetched stream URL for ${nextTrack.title}")
+                }
+                .onFailure { error ->
+                    Log.w(TAG, "Prefetch failed for ${nextTrack.title}: ${error.message}")
+                }
+        }
+    }
+    
+    private fun playSingleTrackInternal(track: Track) {
+        currentQueue = listOf(track) // ExoPlayer only sees one track at a time in lazy mode
+        
+        // Save to recently played
+        recentlyPlayedManager.addSong(
+            id = track.id,
+            title = track.title,
+            artist = track.artist,
+            album = track.album,
+            thumbnailUri = track.artworkUri,
+            duration = track.duration
+        )
+        
+        val mediaItem = MediaItem.Builder()
+            .setUri(track.contentUri)
+            .setMediaId(track.id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(track.title)
+                    .setArtist(track.artist)
+                    .setAlbumTitle(track.album)
+                    .setArtworkUri(track.artworkUri)
+                    .build()
+            )
+            .build()
+        
+        mediaController?.apply {
+            stop()
+            clearMediaItems()
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
+            play()
         }
     }
     
@@ -126,7 +284,7 @@ class PlayerController @Inject constructor(
                 if (mediaController?.isPlaying == true) {
                     updatePlaybackState()
                 }
-                delay(500) // Update more frequently for smoother progress
+                delay(100) // Update every 100ms for smooth lyrics sync
             }
         }
     }
@@ -240,11 +398,118 @@ class PlayerController @Inject constructor(
     }
     
     fun next() {
+        // Priority 1: Playlist Queue
+        if (playlistQueue.isNotEmpty() && playlistQueueIndex >= 0) {
+            val nextIndex = playlistQueueIndex + 1
+            if (nextIndex < playlistQueue.size) {
+                playPlaylistQueueItem(nextIndex)
+                return
+            }
+        }
+        
+        // Priority 2: YouTube Search Queue
+        if (youTubeQueue.isNotEmpty() && youTubeQueueIndex >= 0) {
+            val nextIndex = youTubeQueueIndex + 1
+            if (nextIndex < youTubeQueue.size) {
+                playYouTubeQueueItem(nextIndex)
+                return
+            }
+        }
         mediaController?.seekToNext()
     }
     
     fun previous() {
+        // Priority 1: Playlist Queue
+        if (playlistQueue.isNotEmpty() && playlistQueueIndex >= 0) {
+            val prevIndex = playlistQueueIndex - 1
+            if (prevIndex >= 0) {
+                playPlaylistQueueItem(prevIndex)
+                return
+            }
+        }
+    
+         // Priority 2: YouTube Search Queue
+        if (youTubeQueue.isNotEmpty() && youTubeQueueIndex >= 0) {
+             val prevIndex = youTubeQueueIndex - 1
+             if (prevIndex >= 0) {
+                 playYouTubeQueueItem(prevIndex)
+                 return
+             }
+        }
         mediaController?.seekToPrevious()
+    }
+    
+    /**
+     * Set the YouTube search results queue for navigation
+     */
+    fun setYouTubeQueue(results: List<YouTubeSearchResult>, currentIndex: Int) {
+        youTubeQueue = results
+        youTubeQueueIndex = currentIndex
+        Log.d(TAG, "YouTube queue set with ${results.size} items, starting at index $currentIndex")
+    }
+    
+    /**
+     * Clear the YouTube queue (when switching to local playback)
+     */
+    fun clearYouTubeQueue() {
+        youTubeQueue = emptyList()
+        youTubeQueueIndex = -1
+    }
+    
+    fun clearPlaylistQueue() {
+        playlistQueue = emptyList()
+        playlistQueueIndex = -1
+    }
+    
+    /**
+     * Play a specific item from the YouTube queue with on-demand stream extraction
+     */
+    private fun playYouTubeQueueItem(index: Int) {
+        clearPlaylistQueue() // Ensure mutually exclusive
+        if (index < 0 || index >= youTubeQueue.size || isExtractingStream) return
+        
+        val result = youTubeQueue[index]
+        Log.d(TAG, "Playing YouTube queue item at index $index: ${result.title}")
+        
+        isExtractingStream = true
+        youTubeQueueIndex = index
+        
+        scope.launch {
+            mediaRepository.getYouTubeStreamUrl(result.videoId)
+                .onSuccess { streamInfo ->
+                    val track = mediaRepository.createTrackFromYouTube(streamInfo)
+                    // Play as single track but keep YouTube queue context
+                    currentQueue = listOf(track)
+                    
+                    val mediaItem = MediaItem.Builder()
+                        .setUri(track.contentUri)
+                        .setMediaId(track.id)
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(track.title)
+                                .setArtist(track.artist)
+                                .setAlbumTitle(track.album)
+                                .setArtworkUri(track.artworkUri)
+                                .build()
+                        )
+                        .build()
+                    
+                    mediaController?.apply {
+                        stop()
+                        clearMediaItems()
+                        setMediaItem(mediaItem)
+                        prepare()
+                        playWhenReady = true
+                        play()
+                    }
+                    isExtractingStream = false
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "Failed to extract YouTube stream: ${error.message}")
+                    _error.value = "Failed to play: ${error.message}"
+                    isExtractingStream = false
+                }
+        }
     }
     
     fun seekTo(position: Long) {

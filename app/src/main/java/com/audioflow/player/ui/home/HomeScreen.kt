@@ -1,5 +1,6 @@
 package com.audioflow.player.ui.home
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.audioflow.player.data.local.RecentlyPlayedSong
 import com.audioflow.player.model.Track
 import com.audioflow.player.ui.components.*
 import com.audioflow.player.ui.theme.*
@@ -34,14 +36,25 @@ fun HomeScreen(
     onTrackClick: (Track) -> Unit,
     onNavigateToPlayer: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
+    onNavigateToSearch: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
+    val recentlyPlayedSongs by viewModel.recentlyPlayedSongs.collectAsState()
     
     // Load music when screen is displayed
     LaunchedEffect(Unit) {
         viewModel.loadMusic()
+    }
+    
+    // Navigate to Search when Discover mode is enabled
+    LaunchedEffect(uiState.isDynamicMode) {
+        if (uiState.isDynamicMode) {
+            onNavigateToSearch()
+            // Reset mode after navigation
+            viewModel.toggleContentMode()
+        }
     }
     
     Box(
@@ -68,9 +81,38 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = if (playbackState.currentTrack != null) 140.dp else 80.dp)
             ) {
-                // Header
+                // Header with toggle
                 item {
-                    HomeHeader(onNavigateToSettings = onNavigateToSettings)
+                    HomeHeader(
+                        isDynamicMode = uiState.isDynamicMode,
+                        onToggleMode = { viewModel.toggleContentMode() },
+                        onNavigateToSettings = onNavigateToSettings
+                    )
+                }
+                
+                // Recently Played Songs (from RecentlyPlayedManager)
+                if (recentlyPlayedSongs.isNotEmpty()) {
+                    item {
+                        SectionHeader(title = "Recently Played")
+                    }
+                    
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(recentlyPlayedSongs.take(10)) { song ->
+                                RecentSongCard(
+                                    song = song,
+                                    onClick = { /* TODO: Play this song */ }
+                                )
+                            }
+                        }
+                    }
+                    
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
                 }
                 
                 // Recent Albums
@@ -144,7 +186,7 @@ fun HomeScreen(
                 onPlayPauseClick = { viewModel.togglePlayPause() },
                 onNextClick = { viewModel.playNext() },
                 onClick = onNavigateToPlayer,
-                modifier = Modifier.padding(bottom = 80.dp)
+                modifier = Modifier.padding(bottom = 0.dp)
             )
         }
     }
@@ -152,46 +194,126 @@ fun HomeScreen(
 
 @Composable
 private fun HomeHeader(
+    isDynamicMode: Boolean = false,
+    onToggleMode: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {}
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp, vertical = 16.dp)
     ) {
-        Text(
-            text = "Good evening",
-            style = MaterialTheme.typography.headlineLarge,
-            color = TextPrimary
-        )
-        
-        Row {
-            IconButton(onClick = { /* Notifications */ }) {
-                Icon(
-                    imageVector = Icons.Default.Notifications,
-                    contentDescription = "Notifications",
-                    tint = TextPrimary
-                )
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Good evening",
+                style = MaterialTheme.typography.headlineLarge,
+                color = TextPrimary
+            )
             
-            IconButton(onClick = { /* History */ }) {
-                Icon(
-                    imageVector = Icons.Default.History,
-                    contentDescription = "History",
-                    tint = TextPrimary
-                )
-            }
-            
-            IconButton(onClick = onNavigateToSettings) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    tint = TextPrimary
-                )
+            Row {
+                IconButton(onClick = { /* Notifications */ }) {
+                    Icon(
+                        imageVector = Icons.Default.Notifications,
+                        contentDescription = "Notifications",
+                        tint = TextPrimary
+                    )
+                }
+                
+                IconButton(onClick = { /* History */ }) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = "History",
+                        tint = TextPrimary
+                    )
+                }
+                
+                IconButton(onClick = onNavigateToSettings) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings",
+                        tint = TextPrimary
+                    )
+                }
             }
         }
+        
+        // Local/Dynamic toggle
+        Row(
+            modifier = Modifier
+                .padding(top = 12.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(SpotifySurfaceVariant)
+                .padding(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FilterChip(
+                selected = !isDynamicMode,
+                onClick = { if (isDynamicMode) onToggleMode() },
+                label = { Text("Local") },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = SpotifyGreen,
+                    selectedLabelColor = SpotifyBlack
+                ),
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = isDynamicMode,
+                onClick = { if (!isDynamicMode) onToggleMode() },
+                label = { Text("Discover") },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = SpotifyGreen,
+                    selectedLabelColor = SpotifyBlack
+                ),
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentSongCard(
+    song: RecentlyPlayedSong,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(120.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Thumbnail
+        AsyncImage(
+            model = song.thumbnailUri?.let { Uri.parse(it) },
+            contentDescription = song.title,
+            modifier = Modifier
+                .size(120.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Title
+        Text(
+            text = song.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        
+        // Artist
+        Text(
+            text = song.artist,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

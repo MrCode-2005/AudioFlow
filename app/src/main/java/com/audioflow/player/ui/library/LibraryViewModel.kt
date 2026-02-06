@@ -9,6 +9,7 @@ import com.audioflow.player.model.Playlist
 import com.audioflow.player.model.Track
 import com.audioflow.player.service.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
+import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,10 +30,13 @@ data class LibraryUiState(
     val isLoading: Boolean = false
 )
 
+
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
-    private val playerController: PlayerController
+    private val playerController: PlayerController,
+    private val playlistManager: com.audioflow.player.data.local.PlaylistManager,
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(LibraryUiState())
@@ -42,6 +46,35 @@ class LibraryViewModel @Inject constructor(
     
     init {
         loadLibrary()
+        
+        // Handle deep link / navigation arguments
+        savedStateHandle.get<String>("filter")?.let { filterName ->
+            try {
+                val filter = LibraryFilter.valueOf(filterName)
+                selectFilter(filter)
+            } catch (e: IllegalArgumentException) {
+                // Ignore invalid filter
+            }
+        }
+        
+        // Observe playlists from manager
+        viewModelScope.launch {
+            playlistManager.playlists.collect { localPlaylists ->
+                val mappedPlaylists = localPlaylists.map { local ->
+                    val tracks = local.trackIds.mapNotNull { id ->
+                        mediaRepository.getTrackById(id)
+                    }
+                    com.audioflow.player.model.Playlist(
+                        id = local.id,
+                        name = local.name,
+                        tracks = tracks,
+                        artworkUri = local.thumbnailUri?.let { android.net.Uri.parse(it) },
+                        createdAt = local.createdAt
+                    )
+                }
+                _uiState.value = _uiState.value.copy(playlists = mappedPlaylists)
+            }
+        }
     }
     
     fun loadLibrary() {
@@ -92,42 +125,26 @@ class LibraryViewModel @Inject constructor(
     
     // Playlist Management
     fun createPlaylist(name: String) {
-        val newPlaylist = Playlist(
-            id = UUID.randomUUID().toString(),
-            name = name,
-            description = "",
-            tracks = emptyList()
-        )
-        _uiState.value = _uiState.value.copy(
-            playlists = _uiState.value.playlists + newPlaylist
-        )
+        viewModelScope.launch {
+            playlistManager.createPlaylist(name)
+        }
     }
     
     fun deletePlaylist(playlist: Playlist) {
-        _uiState.value = _uiState.value.copy(
-            playlists = _uiState.value.playlists.filter { it.id != playlist.id }
-        )
+        viewModelScope.launch {
+            playlistManager.deletePlaylist(playlist.id)
+        }
     }
     
     fun addTrackToPlaylist(track: Track, playlist: Playlist) {
-        val updatedPlaylist = playlist.copy(
-            tracks = playlist.tracks + track
-        )
-        _uiState.value = _uiState.value.copy(
-            playlists = _uiState.value.playlists.map { 
-                if (it.id == playlist.id) updatedPlaylist else it 
-            }
-        )
+        viewModelScope.launch {
+            playlistManager.addToPlaylist(playlist.id, track.id)
+        }
     }
     
     fun removeTrackFromPlaylist(track: Track, playlist: Playlist) {
-        val updatedPlaylist = playlist.copy(
-            tracks = playlist.tracks.filter { it.id != track.id }
-        )
-        _uiState.value = _uiState.value.copy(
-            playlists = _uiState.value.playlists.map { 
-                if (it.id == playlist.id) updatedPlaylist else it 
-            }
-        )
+        viewModelScope.launch {
+            playlistManager.removeFromPlaylist(playlist.id, track.id)
+        }
     }
 }

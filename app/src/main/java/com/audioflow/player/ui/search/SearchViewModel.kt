@@ -2,6 +2,8 @@ package com.audioflow.player.ui.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.audioflow.player.data.local.RecentlyPlayedManager
+import com.audioflow.player.data.local.RecentlyPlayedSong
 import com.audioflow.player.data.local.SearchHistoryManager
 import com.audioflow.player.data.remote.YouTubeSearchResult
 import com.audioflow.player.data.repository.MediaRepository
@@ -17,6 +19,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import android.net.Uri
+import android.provider.MediaStore
+import android.content.ContentUris
 import javax.inject.Inject
 
 /**
@@ -27,15 +32,27 @@ enum class SearchMode {
     YOUTUBE     // Search YouTube for streaming
 }
 
+/**
+ * Content filter for YouTube results
+ */
+enum class ContentFilter {
+    ALL,        // Show all results
+    SONGS,      // Only short videos (< 10 min typically songs)
+    PLAYLISTS,  // Filter by playlist-like titles
+    PODCASTS    // Long videos (> 20 min)
+}
+
 data class SearchUiState(
     val query: String = "",
     val searchMode: SearchMode = SearchMode.YOUTUBE,
+    val contentFilter: ContentFilter = ContentFilter.SONGS, // Default to songs
     // Local results
     val tracks: List<Track> = emptyList(),
     val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
     // YouTube results
     val youtubeResults: List<YouTubeSearchResult> = emptyList(),
+    val filteredResults: List<YouTubeSearchResult> = emptyList(), // Filtered results
     val youtubeMetadata: YouTubeMetadata? = null,
     // Loading states
     val isSearching: Boolean = false,
@@ -48,11 +65,13 @@ data class SearchUiState(
     val shouldDismissKeyboard: Boolean = false
 )
 
+
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val playerController: PlayerController,
-    private val searchHistoryManager: SearchHistoryManager
+    private val searchHistoryManager: SearchHistoryManager,
+    private val recentlyPlayedManager: RecentlyPlayedManager
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(SearchUiState())
@@ -60,6 +79,7 @@ class SearchViewModel @Inject constructor(
     
     val playbackState = playerController.playbackState
     val searchHistory = searchHistoryManager.history
+    val recentlyPlayedSongs = recentlyPlayedManager.recentSongs
     
     private var searchJob: Job? = null
     
@@ -150,6 +170,56 @@ class SearchViewModel @Inject constructor(
         }
     }
     
+    /**
+     * Force an immediate search (bypasses debounce)
+     * Use when user explicitly submits via keyboard
+     */
+    fun forceSearch(query: String) {
+        searchJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            query = query,
+            youtubeResults = emptyList(),
+            filteredResults = emptyList(),
+            isSearching = true
+        )
+        viewModelScope.launch {
+            performSearch(query)
+        }
+    }
+    
+    /**
+     * Set content filter and refilter results
+     */
+    fun setContentFilter(filter: ContentFilter) {
+        _uiState.value = _uiState.value.copy(contentFilter = filter)
+        applyContentFilter()
+    }
+    
+    /**
+     * Apply content filter to current YouTube results
+     */
+    private fun applyContentFilter() {
+        val filter = _uiState.value.contentFilter
+        val results = _uiState.value.youtubeResults
+        
+        // duration is in milliseconds: 10min = 600000ms, 20min = 1200000ms
+        val filtered = when (filter) {
+            ContentFilter.ALL -> results
+            ContentFilter.SONGS -> results.filter { it.duration < 600_000 } // < 10 min
+            ContentFilter.PLAYLISTS -> results.filter { 
+                it.title.contains("playlist", ignoreCase = true) ||
+                it.title.contains("mix", ignoreCase = true) ||
+                it.duration > 1_200_000 // > 20 min compilations
+            }
+            ContentFilter.PODCASTS -> results.filter { it.duration > 1_200_000 } // > 20 min
+        }
+        
+        _uiState.value = _uiState.value.copy(
+            filteredResults = filtered,
+            hasResults = filtered.isNotEmpty()
+        )
+    }
+    
     private fun performSearch(query: String) {
         if (query.isBlank()) {
             _uiState.value = _uiState.value.copy(
@@ -206,6 +276,7 @@ class SearchViewModel @Inject constructor(
                     
                     _uiState.value = _uiState.value.copy(
                         youtubeResults = results,
+                        filteredResults = results, // Set initially, then filter
                         tracks = emptyList(),
                         albums = emptyList(),
                         artists = emptyList(),
@@ -213,8 +284,10 @@ class SearchViewModel @Inject constructor(
                         isSearching = false,
                         isYouTubeLoading = false,
                         hasResults = results.isNotEmpty(),
-                        shouldDismissKeyboard = true // Trigger keyboard dismiss
+                        shouldDismissKeyboard = true
                     )
+                    // Apply filter after setting results
+                    applyContentFilter()
                 }
                 .onFailure { error ->
                 val friendlyMessage = when {
@@ -269,6 +342,15 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isExtractingStream = true)
             
+            // Find index of clicked result in filtered results for queue navigation
+            val filteredResults = _uiState.value.filteredResults
+            val clickedIndex = filteredResults.indexOfFirst { it.videoId == result.videoId }
+            
+            // Set the YouTube queue for next/previous navigation
+            if (clickedIndex >= 0) {
+                playerController.setYouTubeQueue(filteredResults, clickedIndex)
+            }
+            
             mediaRepository.getYouTubeStreamUrl(result.videoId)
                 .onSuccess { streamInfo ->
                     val track = mediaRepository.createTrackFromYouTube(streamInfo)
@@ -314,6 +396,8 @@ class SearchViewModel @Inject constructor(
     }
     
     fun playTrack(track: Track) {
+        // Clear YouTube queue when playing local tracks
+        playerController.clearYouTubeQueue()
         playerController.play(track)
     }
     
@@ -327,5 +411,65 @@ class SearchViewModel @Inject constructor(
     
     fun clearError() {
         _uiState.value = _uiState.value.copy(youtubeError = null)
+    }
+    
+    fun removeRecentlyPlayedSong(songId: String) {
+        recentlyPlayedManager.removeSong(songId)
+    }
+    
+    fun playRecentlyPlayedSong(song: RecentlyPlayedSong) {
+        val isYouTube = song.id.startsWith("yt_") || song.thumbnailUri?.contains("ytimg") == true
+        
+        val source = if (isYouTube) com.audioflow.player.model.TrackSource.YOUTUBE else com.audioflow.player.model.TrackSource.LOCAL
+        
+        val contentUri = if (isYouTube) {
+             // For YouTube, we don't have the original stream URL, so we create a dummy one or use ID
+             // The player logic below handles extraction if it looks like a YouTube ID
+             Uri.parse("https://youtube.com/watch?v=${song.id.removePrefix("yt_")}")
+        } else {
+             // For local, reconstruct the content URI
+             ContentUris.withAppendedId(
+                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                 song.id.toLongOrNull() ?: -1L
+             )
+        }
+
+        val track = Track(
+            id = song.id,
+            title = song.title,
+            artist = song.artist,
+            album = song.album,
+            duration = song.duration,
+            artworkUri = song.thumbnailUri?.let { Uri.parse(it) },
+            contentUri = contentUri,
+            source = source
+        )
+        
+        // Use existing play logic which handles queue management
+        if (track.source == com.audioflow.player.model.TrackSource.YOUTUBE) {
+            viewModelScope.launch {
+                 // Trigger extraction since the URL we constructed above is likely not a direct stream
+                 mediaRepository.getYouTubeStreamUrl(track.id.removePrefix("yt_"))
+                    .onSuccess { streamInfo ->
+                        val playableTrack = mediaRepository.createTrackFromYouTube(streamInfo)
+                        playSound(playableTrack)
+                    }
+                    .onFailure {
+                        // Handle error or try playing anyway if possible
+                    }
+            }
+        } else {
+            playSound(track)
+        }
+    }
+
+    private fun playSound(track: Track) {
+        playerController.clearYouTubeQueue()
+        playerController.clearPlaylistQueue()
+        playerController.play(track)
+    }
+
+    fun clearAllRecentlyPlayed() {
+        recentlyPlayedManager.clearAll()
     }
 }

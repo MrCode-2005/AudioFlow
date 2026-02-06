@@ -50,8 +50,12 @@ fun NowPlayingScreen(
     val playbackState by viewModel.playbackState.collectAsState()
     val likedSongIds by viewModel.likedSongIds.collectAsState()
     val showPlaylistSheet by viewModel.showPlaylistSheet.collectAsState()
+    val showNewPlaylistDialog by viewModel.showNewPlaylistDialog.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
     val lyrics by viewModel.lyrics.collectAsState()
     val videoStreamUrl by viewModel.videoStreamUrl.collectAsState()
+    val showOptionsSheet by viewModel.showOptionsSheet.collectAsState()
+    val lyricsEnabled by viewModel.lyricsEnabled.collectAsState()
     val track = playbackState.currentTrack
     
     // Check if current track is liked
@@ -59,6 +63,12 @@ fun NowPlayingScreen(
     
     var sliderPosition by remember { mutableStateOf<Float?>(null) }
     var showLyricsScreen by remember { mutableStateOf(false) }
+    var newPlaylistName by remember { mutableStateOf("") }
+    
+    // Swipe gesture state for debouncing
+    var isSwipeProcessing by remember { mutableStateOf(false) }
+    var accumulatedDragX by remember { mutableStateOf(0f) }
+    var accumulatedDragY by remember { mutableStateOf(0f) }
     
     val progress by animateFloatAsState(
         targetValue = sliderPosition ?: playbackState.progress,
@@ -89,6 +99,11 @@ fun NowPlayingScreen(
         }
     }
     
+    // Reset swipe processing when track changes (enables swiping again)
+    LaunchedEffect(track?.id) {
+        isSwipeProcessing = false
+    }
+    
     // Cleanup
     DisposableEffect(Unit) {
         onDispose {
@@ -114,10 +129,42 @@ fun NowPlayingScreen(
         return
     }
 
+    // Track video player error state
+    var videoError by remember { mutableStateOf(false) }
+    
+    // Listen for video player errors
+    LaunchedEffect(videoPlayer) {
+        videoPlayer.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                videoError = true
+            }
+        })
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(SpotifyBlack)
+            .pointerInput(Unit) {
+                var totalDragAmount = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { totalDragAmount = 0f },
+                    onDragEnd = {
+                        // Trigger navigation if dragged down enough (50dp threshold)
+                        if (totalDragAmount > 50f) {
+                            onNavigateBack()
+                        }
+                        totalDragAmount = 0f
+                    },
+                    onDragCancel = { totalDragAmount = 0f },
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        if (dragAmount > 0) { // Only track downward drag
+                            totalDragAmount += dragAmount
+                        }
+                    }
+                )
+            }
     ) {
         Column(
             modifier = Modifier
@@ -139,15 +186,15 @@ fun NowPlayingScreen(
                         )
                     )
             ) {
-                // Video background or Album art
-                if (!videoStreamUrl.isNullOrBlank()) {
+                // Video background or Album art (fallback if video error or no URL)
+                if (!videoStreamUrl.isNullOrBlank() && !videoError) {
                     // Video player background
                     AndroidView(
                         factory = { ctx ->
                             PlayerView(ctx).apply {
                                 player = videoPlayer
                                 useController = false
-                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                                 layoutParams = FrameLayout.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     ViewGroup.LayoutParams.MATCH_PARENT
@@ -156,33 +203,95 @@ fun NowPlayingScreen(
                         },
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(Unit) {
-                                detectHorizontalDragGestures { change, dragAmount ->
-                                    change.consume()
-                                    if (dragAmount < -50) {
-                                        viewModel.next()
-                                    } else if (dragAmount > 50) {
-                                        viewModel.previous()
+                            .pointerInput(isSwipeProcessing) {
+                                detectHorizontalDragGestures(
+                                    onDragStart = { accumulatedDragX = 0f },
+                                    onDragEnd = {
+                                        if (!isSwipeProcessing) {
+                                            when {
+                                                accumulatedDragX < -150 -> {
+                                                    isSwipeProcessing = true
+                                                    viewModel.next()
+                                                }
+                                                accumulatedDragX > 150 -> {
+                                                    isSwipeProcessing = true
+                                                    viewModel.previous()
+                                                }
+                                            }
+                                        }
+                                        accumulatedDragX = 0f
+                                    },
+                                    onDragCancel = { accumulatedDragX = 0f },
+                                    onHorizontalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        accumulatedDragX += dragAmount
                                     }
-                                }
+                                )
+                            }
+                            .pointerInput(Unit) {
+                                detectVerticalDragGestures(
+                                    onDragStart = { accumulatedDragY = 0f },
+                                    onDragEnd = {
+                                        if (accumulatedDragY > 200) {
+                                            onNavigateBack()
+                                        }
+                                        accumulatedDragY = 0f
+                                    },
+                                    onDragCancel = { accumulatedDragY = 0f },
+                                    onVerticalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        accumulatedDragY += dragAmount
+                                    }
+                                )
                             }
                     )
                 } else {
-                    // Album art fallback
+                    // Album art fallback (always show thumbnail)
                     AsyncImage(
                         model = track?.artworkUri,
                         contentDescription = "Album art",
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(Unit) {
-                                detectHorizontalDragGestures { change, dragAmount ->
-                                    change.consume()
-                                    if (dragAmount < -50) {
-                                        viewModel.next()
-                                    } else if (dragAmount > 50) {
-                                        viewModel.previous()
+                            .pointerInput(isSwipeProcessing) {
+                                detectHorizontalDragGestures(
+                                    onDragStart = { accumulatedDragX = 0f },
+                                    onDragEnd = {
+                                        if (!isSwipeProcessing) {
+                                            when {
+                                                accumulatedDragX < -150 -> {
+                                                    isSwipeProcessing = true
+                                                    viewModel.next()
+                                                }
+                                                accumulatedDragX > 150 -> {
+                                                    isSwipeProcessing = true
+                                                    viewModel.previous()
+                                                }
+                                            }
+                                        }
+                                        accumulatedDragX = 0f
+                                    },
+                                    onDragCancel = { accumulatedDragX = 0f },
+                                    onHorizontalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        accumulatedDragX += dragAmount
                                     }
-                                }
+                                )
+                            }
+                            .pointerInput(Unit) {
+                                detectVerticalDragGestures(
+                                    onDragStart = { accumulatedDragY = 0f },
+                                    onDragEnd = {
+                                        if (accumulatedDragY > 200) {
+                                            onNavigateBack()
+                                        }
+                                        accumulatedDragY = 0f
+                                    },
+                                    onDragCancel = { accumulatedDragY = 0f },
+                                    onVerticalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        accumulatedDragY += dragAmount
+                                    }
+                                )
                             },
                         contentScale = ContentScale.Crop
                     )
@@ -250,7 +359,7 @@ fun NowPlayingScreen(
                         )
                     }
                     
-                    IconButton(onClick = { /* More options */ }) {
+                    IconButton(onClick = { viewModel.showOptionsSheet() }) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
                             contentDescription = "More options",
@@ -509,53 +618,16 @@ fun NowPlayingScreen(
                 }
             }
             
-            // About the artist section (placeholder)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Text(
-                    text = "About the artist",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary
-                )
-                
-                Spacer(modifier = Modifier.height(12.dp))
-                
-                // Artist card placeholder
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp)),
-                    color = SpotifySurfaceVariant
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Text(
-                            text = track?.artist ?: "Unknown Artist",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Artist info coming soon",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
-                }
-            }
-            
-            // Lyrics preview section
-            if (lyrics != null) {
+            // Lyrics preview section (conditional on lyricsEnabled preference)
+            if (lyrics != null && lyricsEnabled) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
                 ) {
                     LyricsPreviewCard(
-                        previewText = lyrics!!.getPreview(),
+                        lyrics = lyrics,
+                        currentPosition = playbackState.currentPosition,
                         onShowLyricsClick = { showLyricsScreen = true }
                     )
                 }
@@ -569,13 +641,69 @@ fun NowPlayingScreen(
         AddToPlaylistSheet(
             isVisible = showPlaylistSheet,
             isLiked = isLiked,
-            playlists = emptyList(), // TODO: Load actual playlists
+            playlists = playlists.map { playlist ->
+                PlaylistItem(
+                    id = playlist.id,
+                    name = playlist.name,
+                    songCount = playlist.trackIds.size,
+                    thumbnailUri = playlist.thumbnailUri
+                )
+            },
             onDismiss = { viewModel.dismissPlaylistSheet() },
-            onLikedSongsClick = { viewModel.dismissPlaylistSheet() },
-            onNewFolderClick = { viewModel.dismissPlaylistSheet() },
-            onPlaylistClick = { viewModel.dismissPlaylistSheet() },
-            onNewPlaylistClick = { viewModel.dismissPlaylistSheet() },
+            onLikedSongsClick = { viewModel.onLikeButtonClick() },
+            onNewFolderClick = { viewModel.createNewFolder() },
+            onPlaylistClick = { viewModel.addToPlaylist(it.id) },
+            onNewPlaylistClick = { viewModel.showCreatePlaylistDialog() },
             onRemoveFromLikedSongs = { viewModel.removeFromLikedSongs() }
+        )
+        
+        // Dialog for creating new playlist
+        if (showNewPlaylistDialog) {
+            AlertDialog(
+                onDismissRequest = { viewModel.hideCreatePlaylistDialog() },
+                title = { Text("New Playlist") },
+                text = {
+                    TextField(
+                        value = newPlaylistName,
+                        onValueChange = { newPlaylistName = it },
+                        placeholder = { Text("Playlist name") },
+                        singleLine = true
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.createNewPlaylist(newPlaylistName)
+                            newPlaylistName = ""
+                        }
+                    ) {
+                        Text("Create")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.hideCreatePlaylistDialog() }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+        
+        // Options sheet (three-dots menu)
+        PlayerOptionsSheet(
+            isVisible = showOptionsSheet,
+            track = track,
+            lyricsEnabled = lyricsEnabled,
+            onDismiss = { viewModel.dismissOptionsSheet() },
+            onLyricsToggle = { viewModel.toggleLyrics() },
+            onAddToPlaylist = { 
+                viewModel.dismissOptionsSheet()
+                viewModel.onLikeButtonClick() // This will show the playlist sheet
+            },
+            onGoToArtist = { viewModel.goToArtist() },
+            onGoToAlbum = { viewModel.goToAlbum() },
+            onViewCredits = { viewModel.viewCredits() },
+            onSleepTimer = { viewModel.openSleepTimer() },
+            onEqualizer = { viewModel.openEqualizer() }
         )
     }
 }

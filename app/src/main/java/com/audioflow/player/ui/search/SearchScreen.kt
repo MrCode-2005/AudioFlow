@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.audioflow.player.data.local.RecentlyPlayedSong
 import com.audioflow.player.data.remote.YouTubeSearchResult
 import com.audioflow.player.model.YouTubeMetadata
 import com.audioflow.player.ui.components.*
@@ -43,6 +44,7 @@ fun SearchScreen(
     val uiState by viewModel.uiState.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
     val searchHistory by viewModel.searchHistory.collectAsState()
+    val recentlyPlayedSongs by viewModel.recentlyPlayedSongs.collectAsState()
     val focusManager = LocalFocusManager.current
     
     // Auto-dismiss keyboard when results load
@@ -127,10 +129,46 @@ fun SearchScreen(
                 shape = RoundedCornerShape(8.dp),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
+                keyboardActions = KeyboardActions(onSearch = { 
+                    viewModel.forceSearch(uiState.query)
+                    focusManager.clearFocus() 
+                })
             )
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            // Content filter chips (only show for YouTube mode with results or a query)
+            if (uiState.searchMode == SearchMode.YOUTUBE && uiState.query.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ContentFilter.entries.forEach { filter ->
+                        FilterChip(
+                            selected = uiState.contentFilter == filter,
+                            onClick = { viewModel.setContentFilter(filter) },
+                            label = { 
+                                Text(
+                                    text = when (filter) {
+                                        ContentFilter.ALL -> "All"
+                                        ContentFilter.SONGS -> "Songs"
+                                        ContentFilter.PLAYLISTS -> "Playlists"
+                                        ContentFilter.PODCASTS -> "Podcasts"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = SpotifyGreen,
+                                selectedLabelColor = SpotifyBlack
+                            )
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             
             // Content based on state
             Box(modifier = Modifier.weight(1f)) {
@@ -163,9 +201,9 @@ fun SearchScreen(
                             onDismiss = { viewModel.clearError() }
                         )
                     }
-                    uiState.searchMode == SearchMode.YOUTUBE && uiState.youtubeResults.isNotEmpty() -> {
+                    uiState.searchMode == SearchMode.YOUTUBE && uiState.filteredResults.isNotEmpty() -> {
                         YouTubeSearchResultsContent(
-                            results = uiState.youtubeResults,
+                            results = uiState.filteredResults,
                             onResultClick = { viewModel.playYouTubeResult(it) }
                         )
                     }
@@ -181,12 +219,13 @@ fun SearchScreen(
                             searchMode = uiState.searchMode
                         )
                     }
-                    uiState.searchMode == SearchMode.YOUTUBE && searchHistory.isNotEmpty() -> {
-                        SearchHistoryContent(
-                            history = searchHistory,
-                            onHistoryItemClick = { viewModel.searchFromHistory(it) },
-                            onHistoryItemDelete = { viewModel.removeSearchHistoryItem(it) },
-                            onClearAll = { viewModel.clearSearchHistory() }
+                    recentlyPlayedSongs.isNotEmpty() -> {
+                        // Show recently played songs regardless of search mode when no query
+                        RecentlyPlayedContent(
+                            songs = recentlyPlayedSongs.take(20),
+                            onSongClick = { song -> viewModel.playRecentlyPlayedSong(song) },
+                            onSongDelete = { viewModel.removeRecentlyPlayedSong(it) },
+                            onClearAll = { viewModel.clearAllRecentlyPlayed() }
                         )
                     }
                     else -> {
@@ -208,7 +247,7 @@ fun SearchScreen(
                 onPlayPauseClick = { viewModel.togglePlayPause() },
                 onNextClick = { viewModel.playNext() },
                 onClick = onNavigateToPlayer,
-                modifier = Modifier.padding(bottom = 80.dp)
+                modifier = Modifier.padding(bottom = 0.dp)
             )
         }
     }
@@ -836,4 +875,136 @@ private fun formatDuration(durationMs: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
+}
+
+/**
+ * Recently played songs content (Spotify-style song cards with thumbnails)
+ */
+@Composable
+private fun RecentlyPlayedContent(
+    songs: List<RecentlyPlayedSong>,
+    onSongClick: (RecentlyPlayedSong) -> Unit,
+    onSongDelete: (String) -> Unit,
+    onClearAll: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(bottom = 140.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Recently Played",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary
+                )
+                TextButton(onClick = onClearAll) {
+                    Text(
+                        text = "Clear All",
+                        color = SpotifyGreen
+                    )
+                }
+            }
+        }
+        
+        items(songs) { song ->
+            RecentlyPlayedSongItem(
+                song = song,
+                onClick = { onSongClick(song) },
+                onDelete = { onSongDelete(song.id) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentlyPlayedSongItem(
+    song: RecentlyPlayedSong,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Thumbnail
+        AsyncImage(
+            model = song.thumbnailUri?.let { Uri.parse(it) },
+            contentDescription = song.title,
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(4.dp)),
+            contentScale = ContentScale.Crop
+        )
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        // Song info
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (song.duration > 0) {
+                    Text(
+                        text = " • ${formatDuration(song.duration)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextTertiary
+                    )
+                }
+            }
+        }
+        
+        // Add button (for adding to playlist)
+        IconButton(
+            onClick = { /* TODO: Add to playlist */ },
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Add to playlist",
+                tint = TextSecondary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        
+        // Delete button
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Remove",
+                tint = TextSecondary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
 }

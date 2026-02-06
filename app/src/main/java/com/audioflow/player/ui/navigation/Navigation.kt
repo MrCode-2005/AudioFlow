@@ -14,6 +14,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import androidx.navigation.NavType
+import com.audioflow.player.ui.create.CreateScreen
 import com.audioflow.player.ui.home.HomeScreen
 import com.audioflow.player.ui.library.LibraryScreen
 import com.audioflow.player.ui.player.NowPlayingScreen
@@ -44,9 +47,16 @@ sealed class Screen(
     
     data object Library : Screen(
         route = "library",
-        title = "Your Library",
+        title = "Library",
         selectedIcon = Icons.Filled.LibraryMusic,
         unselectedIcon = Icons.Outlined.LibraryMusic
+    )
+    
+    data object Create : Screen(
+        route = "create",
+        title = "Create",
+        selectedIcon = Icons.Filled.AddCircle,
+        unselectedIcon = Icons.Outlined.AddCircle
     )
     
     data object NowPlaying : Screen(
@@ -69,6 +79,13 @@ sealed class Screen(
         selectedIcon = Icons.Filled.Login,
         unselectedIcon = Icons.Outlined.Lock
     )
+
+    data object PlaylistDetail : Screen(
+        route = "playlist/{playlistId}",
+        title = "Playlist",
+        selectedIcon = Icons.Filled.PlaylistPlay,
+        unselectedIcon = Icons.Outlined.PlaylistPlay
+    )
 }
 
 @Composable
@@ -77,8 +94,11 @@ fun AudioFlowNavigation() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
     
-    val bottomNavScreens = listOf(Screen.Home, Screen.Search, Screen.Library)
-    val showBottomBar = currentDestination?.route in bottomNavScreens.map { it.route }
+    val bottomNavScreens = listOf(Screen.Home, Screen.Search, Screen.Create, Screen.Library)
+    // Check if current route starts with any bottom nav screen route (to handle arguments)
+    val showBottomBar = currentDestination?.route?.let { route ->
+        bottomNavScreens.any { screen -> route.startsWith(screen.route) }
+    } == true
     
     Scaffold(
         containerColor = SpotifyBlack,
@@ -140,6 +160,9 @@ fun AudioFlowNavigation() {
                     },
                     onNavigateToSettings = {
                         navController.navigate(Screen.Settings.route)
+                    },
+                    onNavigateToSearch = {
+                        navController.navigate(Screen.Search.route)
                     }
                 )
             }
@@ -152,15 +175,61 @@ fun AudioFlowNavigation() {
                 )
             }
             
-            composable(Screen.Library.route) {
+            composable(
+                route = "${Screen.Library.route}?filter={filter}",
+                arguments = listOf(
+                    navArgument("filter") {
+                        type = NavType.StringType
+                        nullable = true
+                    }
+                )
+            ) {
                 LibraryScreen(
                     onNavigateToPlayer = {
-                        navController.navigate(Screen.NowPlaying.route)
+                        navController.navigate(Screen.NowPlaying.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onNavigateToPlaylist = { playlistId ->
+                        navController.navigate(Screen.PlaylistDetail.route.replace("{playlistId}", playlistId))
                     }
                 )
             }
             
-            composable(Screen.NowPlaying.route) {
+            composable(Screen.Create.route) {
+                CreateScreen(
+                    onNavigateToPlayer = {
+                        navController.navigate(Screen.NowPlaying.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onNavigateToPlaylist = { playlistId ->
+                        navController.navigate(Screen.PlaylistDetail.route.replace("{playlistId}", playlistId))
+                    },
+                    onNavigateToLibrary = {
+                        navController.navigate("${Screen.Library.route}?filter=PLAYLISTS") {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
+
+        composable(Screen.PlaylistDetail.route) {
+            com.audioflow.player.ui.library.PlaylistDetailScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToPlayer = {
+                    navController.navigate(Screen.NowPlaying.route) {
+                        launchSingleTop = true
+                    }
+                }
+            )
+        }
+
+        composable(Screen.NowPlaying.route) {
                 NowPlayingScreen(
                     onNavigateBack = {
                         navController.popBackStack()

@@ -36,6 +36,7 @@ import com.audioflow.player.ui.theme.*
 @Composable
 fun LibraryScreen(
     onNavigateToPlayer: () -> Unit,
+    onNavigateToPlaylist: (String) -> Unit,
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -90,7 +91,7 @@ fun LibraryScreen(
                 LibraryFilter.PLAYLISTS -> {
                     PlaylistsContent(
                         playlists = uiState.playlists,
-                        onPlaylistClick = { /* Navigate to playlist */ },
+                        onPlaylistClick = { onNavigateToPlaylist(it.id) },
                         onCreatePlaylistClick = { showCreatePlaylistDialog = true },
                         onDeletePlaylistClick = { viewModel.deletePlaylist(it) },
                         modifier = Modifier.weight(1f)
@@ -111,7 +112,7 @@ fun LibraryScreen(
                 onPlayPauseClick = { viewModel.togglePlayPause() },
                 onNextClick = { viewModel.playNext() },
                 onClick = onNavigateToPlayer,
-                modifier = Modifier.padding(bottom = 80.dp)
+                modifier = Modifier.padding(bottom = 0.dp)
             )
         }
         

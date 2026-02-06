@@ -2,9 +2,11 @@ package com.audioflow.player.ui.player
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -14,11 +16,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.audioflow.player.data.remote.LyricLine
 import com.audioflow.player.data.remote.LyricsResult
+import kotlinx.coroutines.launch
 
 // Spotify-like pink/magenta color for lyrics
 val LyricsPink = Color(0xFFE91E63)
@@ -27,7 +30,7 @@ val LyricsPinkLight = Color(0xFFF48FB1)
 
 /**
  * Full-screen lyrics view with pink gradient background
- * Matches Spotify's lyrics screen design
+ * Auto-scrolls to current lyric line based on playback position
  */
 @Composable
 fun LyricsScreen(
@@ -43,7 +46,27 @@ fun LyricsScreen(
     onSeek: (Float) -> Unit,
     onShareClick: () -> Unit
 ) {
-    val scrollState = rememberScrollState()
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    
+    // Calculate current line index from synced lyrics
+    val currentLineIndex = remember(lyrics, currentPosition) {
+        lyrics?.syncedLines?.let { lines ->
+            lines.indexOfLast { it.timestampMs <= currentPosition }
+                .coerceAtLeast(0)
+        } ?: 0
+    }
+    
+    // Auto-scroll to current line when it changes
+    LaunchedEffect(currentLineIndex) {
+        if (lyrics?.syncedLines != null && currentLineIndex >= 0) {
+            coroutineScope.launch {
+                // Scroll with some padding (show a few lines before)
+                val targetIndex = (currentLineIndex - 2).coerceAtLeast(0)
+                listState.animateScrollToItem(targetIndex)
+            }
+        }
+    }
     
     Box(
         modifier = Modifier
@@ -99,12 +122,12 @@ fun LyricsScreen(
                     )
                 }
                 
-                Spacer(modifier = Modifier.width(48.dp)) // Balance the back button
+                Spacer(modifier = Modifier.width(48.dp))
             }
             
             Spacer(modifier = Modifier.height(24.dp))
             
-            // Lyrics content (scrollable)
+            // Lyrics content (LazyColumn for synced scrolling)
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -112,30 +135,40 @@ fun LyricsScreen(
                     .padding(horizontal = 24.dp)
             ) {
                 if (lyrics != null) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(scrollState)
+                    val lines = lyrics.syncedLines ?: lyrics.plainText.lines()
+                        .filter { it.isNotBlank() }
+                        .mapIndexed { index, text -> LyricLine((index * 3000).toLong(), text) }
+                    
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        // Display lyrics line by line with large font
-                        lyrics.plainText.lines()
-                            .filter { it.isNotBlank() }
-                            .forEach { line ->
-                                Text(
-                                    text = line,
-                                    style = MaterialTheme.typography.headlineSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        lineHeight = 36.sp
-                                    ),
-                                    color = Color.White,
-                                    modifier = Modifier.padding(vertical = 8.dp)
-                                )
-                            }
+                        itemsIndexed(lines) { index, line ->
+                            val isCurrentLine = index == currentLineIndex
+                            val isPastLine = index < currentLineIndex
+                            
+                            Text(
+                                text = line.text,
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontWeight = if (isCurrentLine) FontWeight.ExtraBold else FontWeight.Bold,
+                                    lineHeight = 36.sp,
+                                    fontSize = if (isCurrentLine) 26.sp else 22.sp
+                                ),
+                                color = when {
+                                    isCurrentLine -> Color.White
+                                    isPastLine -> Color.White.copy(alpha = 0.5f)
+                                    else -> Color.White.copy(alpha = 0.7f)
+                                },
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
                         
-                        Spacer(modifier = Modifier.height(100.dp))
+                        item {
+                            Spacer(modifier = Modifier.height(100.dp))
+                        }
                     }
                 } else {
-                    // Loading or no lyrics
+                    // No lyrics
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -236,19 +269,27 @@ fun LyricsScreen(
 }
 
 /**
- * Lyrics preview card for NowPlayingScreen
+ * Synced lyrics preview card for NowPlayingScreen
+ * Shows animated current line
  */
 @Composable
 fun LyricsPreviewCard(
-    previewText: String,
+    lyrics: LyricsResult?,
+    currentPosition: Long,
     onShowLyricsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val currentLineIndex = remember(lyrics, currentPosition) {
+        lyrics?.syncedLines?.let { lines ->
+            lines.indexOfLast { it.timestampMs <= currentPosition }
+                .coerceAtLeast(0)
+        } ?: 0
+    }
+    
     Surface(
-        modifier = modifier
-            .fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         color = LyricsPink,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp)
@@ -261,32 +302,40 @@ fun LyricsPreviewCard(
             
             Spacer(modifier = Modifier.height(12.dp))
             
-            // Preview lyrics (first few lines)
-            previewText.lines()
-                .filter { it.isNotBlank() }
-                .take(4)
-                .forEach { line ->
+            if (lyrics?.syncedLines != null) {
+                // Show synced lyrics with current line highlighted
+                val lines = lyrics.syncedLines!!
+                val startIndex = (currentLineIndex - 1).coerceAtLeast(0)
+                val endIndex = (currentLineIndex + 3).coerceAtMost(lines.size)
+                
+                lines.subList(startIndex, endIndex).forEachIndexed { offset, line ->
+                    val isCurrentLine = startIndex + offset == currentLineIndex
                     Text(
-                        text = line,
+                        text = line.text,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
+                            fontWeight = if (isCurrentLine) FontWeight.ExtraBold else FontWeight.Bold,
+                            fontSize = if (isCurrentLine) 18.sp else 14.sp
                         ),
-                        color = Color.White,
+                        color = if (isCurrentLine) Color.White else Color.White.copy(alpha = 0.6f),
                         modifier = Modifier.padding(vertical = 2.dp)
                     )
                 }
-            
-            // Faded last line
-            Text(
-                text = previewText.lines()
+            } else if (lyrics != null) {
+                // Plain lyrics preview
+                lyrics.plainText.lines()
                     .filter { it.isNotBlank() }
-                    .getOrNull(4) ?: "",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = Color.White.copy(alpha = 0.4f),
-                modifier = Modifier.padding(vertical = 2.dp)
-            )
+                    .take(4)
+                    .forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = Color.White,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+            }
             
             Spacer(modifier = Modifier.height(16.dp))
             
@@ -294,7 +343,7 @@ fun LyricsPreviewCard(
             Surface(
                 onClick = onShowLyricsClick,
                 color = Color.Black.copy(alpha = 0.2f),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+                shape = RoundedCornerShape(20.dp)
             ) {
                 Text(
                     text = "Show lyrics",
