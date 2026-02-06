@@ -37,6 +37,34 @@ data class YouTubeStreamInfo(
 )
 
 /**
+ * YouTube playlist info
+ */
+data class YouTubePlaylistInfo(
+    val playlistId: String,
+    val title: String,
+    val channelName: String,
+    val thumbnailUrl: String,
+    val videoCount: Int,
+    val videos: List<YouTubeSearchResult>
+)
+
+/**
+ * Video stream info for background video playback
+ */
+data class YouTubeVideoStreamInfo(
+    val videoId: String,
+    val videoStreamUrl: String,
+    val audioStreamUrl: String?,
+    val mimeType: String,
+    val width: Int,
+    val height: Int,
+    val title: String,
+    val artist: String,
+    val thumbnailUrl: String,
+    val duration: Long
+)
+
+/**
  * YouTube extractor using yt-dlp via youtubedl-android library.
  * Provides reliable YouTube search and audio stream extraction.
  */
@@ -131,6 +159,107 @@ class YouTubeExtractor @Inject constructor(
                     e.message?.contains("network") == true -> Result.failure(YouTubeError.NetworkError(e.message ?: "Network error"))
                     else -> Result.failure(YouTubeError.ServiceUnavailable)
                 }
+            }
+        }
+    
+    /**
+     * Check if URL is a YouTube playlist
+     */
+    fun isPlaylistUrl(url: String): Boolean {
+        return url.contains("youtube.com/playlist") ||
+               url.contains("list=")
+    }
+    
+    /**
+     * Extract all videos from a YouTube playlist using yt-dlp
+     */
+    suspend fun extractPlaylist(playlistUrl: String): Result<YouTubePlaylistInfo> =
+        withContext(Dispatchers.IO) {
+            Log.d(TAG, "Extracting playlist: $playlistUrl")
+            
+            // Wait for yt-dlp initialization
+            var attempts = 0
+            while (!com.audioflow.player.AudioFlowApp.isYtDlpReady && attempts < 30) {
+                delay(100)
+                attempts++
+            }
+            
+            if (!com.audioflow.player.AudioFlowApp.isYtDlpReady) {
+                return@withContext Result.failure(YouTubeError.ServiceUnavailable)
+            }
+            
+            try {
+                val request = YoutubeDLRequest(playlistUrl)
+                request.addOption("--flat-playlist") // Get metadata only
+                request.addOption("--no-download")
+                request.addOption("-j") // JSON output
+                request.addOption("--no-warnings")
+                request.addOption("--ignore-errors")
+                
+                val response = YoutubeDL.getInstance().execute(request)
+                val output = response.out
+                
+                if (output.isNullOrBlank()) {
+                    return@withContext Result.failure(YouTubeError.ServiceUnavailable)
+                }
+                
+                // Parse JSON lines
+                val videos = mutableListOf<YouTubeSearchResult>()
+                var playlistTitle = "Unknown Playlist"
+                var playlistId = ""
+                var channelName = "Unknown"
+                var playlistThumb = ""
+                
+                output.lines().forEach { line ->
+                    if (line.isBlank()) return@forEach
+                    try {
+                        val json = org.json.JSONObject(line)
+                        
+                        // Get playlist metadata from first entry
+                        if (playlistId.isEmpty()) {
+                            playlistId = json.optString("playlist_id", "")
+                            playlistTitle = json.optString("playlist_title", "Playlist")
+                            channelName = json.optString("playlist_uploader", "Unknown")
+                        }
+                        
+                        val videoId = json.optString("id", "")
+                        if (videoId.isEmpty()) return@forEach
+                        
+                        val title = json.optString("title", "Unknown Title")
+                        val uploader = json.optString("uploader", json.optString("channel", channelName))
+                        val duration = json.optLong("duration", 0) * 1000
+                        
+                        val thumbnail = json.optString("thumbnail", "")
+                            .ifEmpty { "https://img.youtube.com/vi/$videoId/hqdefault.jpg" }
+                        
+                        if (playlistThumb.isEmpty()) playlistThumb = thumbnail
+                        
+                        videos.add(YouTubeSearchResult(
+                            videoId = videoId,
+                            title = title,
+                            artist = uploader,
+                            thumbnailUrl = thumbnail,
+                            duration = duration
+                        ))
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to parse playlist entry: ${e.message}")
+                    }
+                }
+                
+                Log.d(TAG, "Extracted ${videos.size} videos from playlist")
+                
+                Result.success(YouTubePlaylistInfo(
+                    playlistId = playlistId,
+                    title = playlistTitle,
+                    channelName = channelName,
+                    thumbnailUrl = playlistThumb,
+                    videoCount = videos.size,
+                    videos = videos
+                ))
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Playlist extraction failed: ${e.message}", e)
+                Result.failure(YouTubeError.ServiceUnavailable)
             }
         }
     
@@ -247,6 +376,105 @@ class YouTubeExtractor @Inject constructor(
                     else -> 
                         Result.failure(YouTubeError.ServiceUnavailable)
                 }
+            }
+        }
+    
+    /**
+     * Extract video stream URL for background video playback
+     * Returns both video and audio streams for ExoPlayer
+     */
+    suspend fun extractVideoStream(videoId: String): Result<YouTubeVideoStreamInfo> =
+        withContext(Dispatchers.IO) {
+            Log.d(TAG, "Extracting video stream for: $videoId")
+            
+            // Wait for yt-dlp initialization
+            var attempts = 0
+            while (!com.audioflow.player.AudioFlowApp.isYtDlpReady && attempts < 30) {
+                delay(100)
+                attempts++
+            }
+            
+            if (!com.audioflow.player.AudioFlowApp.isYtDlpReady) {
+                return@withContext Result.failure(YouTubeError.ServiceUnavailable)
+            }
+            
+            try {
+                val videoUrl = "https://www.youtube.com/watch?v=$videoId"
+                val request = YoutubeDLRequest(videoUrl)
+                request.addOption("--no-playlist")
+                // Request best video + audio for background playback
+                request.addOption("-f", "best[height<=720]/bestvideo[height<=720]+bestaudio/best")
+                
+                val videoInfo = YoutubeDL.getInstance().getInfo(request)
+                
+                if (videoInfo == null) {
+                    return@withContext Result.failure(YouTubeError.VideoUnavailable("Could not extract video info"))
+                }
+                
+                var videoStreamUrl: String? = null
+                var audioStreamUrl: String? = null
+                var width = 1280
+                var height = 720
+                
+                // Try to get combined stream first
+                if (!videoInfo.url.isNullOrBlank()) {
+                    videoStreamUrl = videoInfo.url
+                }
+                
+                // Otherwise check requested formats for separate streams
+                if (videoStreamUrl.isNullOrBlank()) {
+                    val requestedFormats = videoInfo.requestedFormats
+                    if (requestedFormats != null && requestedFormats.isNotEmpty()) {
+                        // Find video format
+                        val videoFormat = requestedFormats.find { 
+                            it.vcodec != null && it.vcodec != "none"
+                        }
+                        // Find audio format
+                        val audioFormat = requestedFormats.find {
+                            it.acodec != null && it.acodec != "none" && (it.vcodec == null || it.vcodec == "none")
+                        }
+                        
+                        videoFormat?.let {
+                            videoStreamUrl = it.url
+                            width = it.width?.toInt() ?: 1280
+                            height = it.height?.toInt() ?: 720
+                        }
+                        audioFormat?.let {
+                            audioStreamUrl = it.url
+                        }
+                    }
+                }
+                
+                // Fallback to manifest URL
+                if (videoStreamUrl.isNullOrBlank() && !videoInfo.manifestUrl.isNullOrBlank()) {
+                    videoStreamUrl = videoInfo.manifestUrl
+                }
+                
+                if (videoStreamUrl.isNullOrBlank()) {
+                    return@withContext Result.failure(YouTubeError.VideoUnavailable("No video stream available"))
+                }
+                
+                val title = videoInfo.title ?: "Unknown Title"
+                val artist = videoInfo.uploader ?: "Unknown Artist"
+                val duration = (videoInfo.duration?.toLong() ?: 0L) * 1000
+                val thumbnail = videoInfo.thumbnail ?: "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+                
+                Result.success(YouTubeVideoStreamInfo(
+                    videoId = videoId,
+                    videoStreamUrl = videoStreamUrl!!,
+                    audioStreamUrl = audioStreamUrl,
+                    mimeType = "video/mp4",
+                    width = width,
+                    height = height,
+                    title = title,
+                    artist = artist,
+                    thumbnailUrl = thumbnail,
+                    duration = duration
+                ))
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Video stream extraction failed: ${e.message}", e)
+                Result.failure(YouTubeError.ServiceUnavailable)
             }
         }
     

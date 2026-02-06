@@ -2,6 +2,7 @@ package com.audioflow.player.ui.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.audioflow.player.data.local.SearchHistoryManager
 import com.audioflow.player.data.remote.YouTubeSearchResult
 import com.audioflow.player.data.repository.MediaRepository
 import com.audioflow.player.model.Album
@@ -42,29 +43,63 @@ data class SearchUiState(
     val isExtractingStream: Boolean = false,
     // Errors
     val youtubeError: String? = null,
-    val hasResults: Boolean = false
+    val hasResults: Boolean = false,
+    // Keyboard dismiss trigger
+    val shouldDismissKeyboard: Boolean = false
 )
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
-    private val playerController: PlayerController
+    private val playerController: PlayerController,
+    private val searchHistoryManager: SearchHistoryManager
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
     
     val playbackState = playerController.playbackState
+    val searchHistory = searchHistoryManager.history
     
     private var searchJob: Job? = null
     
     fun updateQuery(query: String) {
-        _uiState.value = _uiState.value.copy(query = query)
+        // Clear results immediately when query changes to avoid showing stale results
+        _uiState.value = _uiState.value.copy(
+            query = query,
+            shouldDismissKeyboard = false
+        )
         
-        // Debounce search
+        // Cancel previous search
         searchJob?.cancel()
+        
+        if (query.isBlank()) {
+            // Clear results when query is empty
+            _uiState.value = _uiState.value.copy(
+                tracks = emptyList(),
+                albums = emptyList(),
+                artists = emptyList(),
+                youtubeResults = emptyList(),
+                youtubeMetadata = null,
+                youtubeError = null,
+                isSearching = false,
+                hasResults = false
+            )
+            return
+        }
+        
+        // Clear YouTube results immediately to prevent showing old results
+        if (_uiState.value.searchMode == SearchMode.YOUTUBE) {
+            _uiState.value = _uiState.value.copy(
+                youtubeResults = emptyList(),
+                isSearching = true
+            )
+        }
+        
+        // Debounce: 500ms for YouTube (slower API), 300ms for local
+        val debounceTime = if (_uiState.value.searchMode == SearchMode.YOUTUBE) 500L else 300L
         searchJob = viewModelScope.launch {
-            delay(300)
+            delay(debounceTime)
             performSearch(query)
         }
     }
@@ -166,6 +201,9 @@ class SearchViewModel @Inject constructor(
             
             mediaRepository.searchYouTube(query)
                 .onSuccess { results ->
+                    // Save to search history on successful search
+                    searchHistoryManager.addSearch(query)
+                    
                     _uiState.value = _uiState.value.copy(
                         youtubeResults = results,
                         tracks = emptyList(),
@@ -174,7 +212,8 @@ class SearchViewModel @Inject constructor(
                         youtubeMetadata = null,
                         isSearching = false,
                         isYouTubeLoading = false,
-                        hasResults = results.isNotEmpty()
+                        hasResults = results.isNotEmpty(),
+                        shouldDismissKeyboard = true // Trigger keyboard dismiss
                     )
                 }
                 .onFailure { error ->
@@ -255,6 +294,23 @@ class SearchViewModel @Inject constructor(
     
     fun clearSearch() {
         _uiState.value = SearchUiState(searchMode = _uiState.value.searchMode)
+    }
+    
+    fun onKeyboardDismissed() {
+        _uiState.value = _uiState.value.copy(shouldDismissKeyboard = false)
+    }
+    
+    fun clearSearchHistory() {
+        searchHistoryManager.clearAll()
+    }
+    
+    fun removeSearchHistoryItem(query: String) {
+        searchHistoryManager.removeItem(query)
+    }
+    
+    fun searchFromHistory(query: String) {
+        _uiState.value = _uiState.value.copy(query = query)
+        performSearch(query)
     }
     
     fun playTrack(track: Track) {

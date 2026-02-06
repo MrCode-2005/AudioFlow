@@ -42,7 +42,16 @@ fun SearchScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
+    val searchHistory by viewModel.searchHistory.collectAsState()
     val focusManager = LocalFocusManager.current
+    
+    // Auto-dismiss keyboard when results load
+    LaunchedEffect(uiState.shouldDismissKeyboard) {
+        if (uiState.shouldDismissKeyboard) {
+            focusManager.clearFocus()
+            viewModel.onKeyboardDismissed()
+        }
+    }
     
     Box(
         modifier = Modifier
@@ -170,6 +179,14 @@ fun SearchScreen(
                         NoResultsContent(
                             query = uiState.query,
                             searchMode = uiState.searchMode
+                        )
+                    }
+                    uiState.searchMode == SearchMode.YOUTUBE && searchHistory.isNotEmpty() -> {
+                        SearchHistoryContent(
+                            history = searchHistory,
+                            onHistoryItemClick = { viewModel.searchFromHistory(it) },
+                            onHistoryItemDelete = { viewModel.removeSearchHistoryItem(it) },
+                            onClearAll = { viewModel.clearSearchHistory() }
                         )
                     }
                     else -> {
@@ -732,6 +749,82 @@ private fun BrowseContent(
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary
         )
+    }
+}
+
+@Composable
+private fun SearchHistoryContent(
+    history: List<String>,
+    onHistoryItemClick: (String) -> Unit,
+    onHistoryItemDelete: (String) -> Unit,
+    onClearAll: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(bottom = 140.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Recent Searches",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary
+                )
+                TextButton(onClick = onClearAll) {
+                    Text(
+                        text = "Clear All",
+                        color = SpotifyGreen
+                    )
+                }
+            }
+        }
+        
+        items(history) { query ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onHistoryItemClick(query) }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.History,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                    modifier = Modifier.size(20.dp)
+                )
+                
+                Spacer(modifier = Modifier.width(16.dp))
+                
+                Text(
+                    text = query,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = TextPrimary,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                
+                IconButton(
+                    onClick = { onHistoryItemDelete(query) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remove",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
