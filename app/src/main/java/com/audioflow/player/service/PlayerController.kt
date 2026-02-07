@@ -69,7 +69,13 @@ class PlayerController @Inject constructor(
     // Cache for extracted stream URLs to avoid re-extraction
     private val streamUrlCache = mutableMapOf<String, CachedStreamUrl>()
     private data class CachedStreamUrl(val url: String, val timestamp: Long, val mimeType: String? = null)
-    private val CACHE_DURATION_MS = 10 * 60 * 1000L // 10 minutes - longer cache for faster playback
+    private val CACHE_DURATION_MS = 15 * 60 * 1000L // 15 minutes - longer cache for faster playback
+    
+    // PRE-PREPARED TRACKS: Ready-to-play Track objects with resolved URLs
+    private val preparedTracks = mutableMapOf<String, Track>()
+    
+    // Pre-built MediaItems ready for instant queue insertion
+    private val preparedMediaItems = mutableMapOf<String, MediaItem>()
     
     /**
      * Create a MediaItem with proper MIME type hints for YouTube streams.
@@ -430,6 +436,9 @@ class PlayerController @Inject constructor(
         mediaController?.play()
     }
     
+    /**
+     * INSTANT NEXT: Uses pre-prepared MediaItems for zero-delay transitions
+     */
     fun next() {
         // Priority 1: Playlist Queue
         if (playlistQueue.isNotEmpty() && playlistQueueIndex >= 0) {
@@ -440,10 +449,39 @@ class PlayerController @Inject constructor(
             }
         }
         
-        // Priority 2: YouTube Search Queue
+        // Priority 2: YouTube Search Queue with INSTANT playback
         if (youTubeQueue.isNotEmpty() && youTubeQueueIndex >= 0) {
             val nextIndex = youTubeQueueIndex + 1
             if (nextIndex < youTubeQueue.size) {
+                val nextResult = youTubeQueue[nextIndex]
+                
+                // CHECK: Is next item already in ExoPlayer queue? Use seekToNext for instant transition
+                val controller = mediaController
+                if (controller != null && controller.mediaItemCount > 1 && controller.currentMediaItemIndex < controller.mediaItemCount - 1) {
+                    Log.d(TAG, "⚡ INSTANT NEXT: Using ExoPlayer queue - zero delay!")
+                    youTubeQueueIndex = nextIndex
+                    controller.seekToNext()
+                    
+                    // Update current track info
+                    val preparedTrack = preparedTracks[nextResult.videoId]
+                    if (preparedTrack != null) {
+                        currentQueue = listOf(preparedTrack)
+                        recentlyPlayedManager.addSong(
+                            id = preparedTrack.id,
+                            title = preparedTrack.title,
+                            artist = preparedTrack.artist,
+                            album = preparedTrack.album,
+                            thumbnailUri = preparedTrack.artworkUri,
+                            duration = preparedTrack.duration
+                        )
+                    }
+                    
+                    // Keep prefetching ahead
+                    prefetchAdjacentYouTubeItems(nextIndex)
+                    return
+                }
+                
+                // Fallback: Play directly (still fast if pre-prepared)
                 playYouTubeQueueItem(nextIndex)
                 return
             }
@@ -451,6 +489,9 @@ class PlayerController @Inject constructor(
         mediaController?.seekToNext()
     }
     
+    /**
+     * INSTANT PREVIOUS: Uses pre-prepared MediaItems for zero-delay transitions
+     */
     fun previous() {
         // Priority 1: Playlist Queue
         if (playlistQueue.isNotEmpty() && playlistQueueIndex >= 0) {
@@ -461,12 +502,58 @@ class PlayerController @Inject constructor(
             }
         }
     
-         // Priority 2: YouTube Search Queue
+        // Priority 2: YouTube Search Queue with INSTANT playback
         if (youTubeQueue.isNotEmpty() && youTubeQueueIndex >= 0) {
-             val prevIndex = youTubeQueueIndex - 1
-             if (prevIndex >= 0) {
-                 playYouTubeQueueItem(prevIndex)
-                 return
+            val prevIndex = youTubeQueueIndex - 1
+            if (prevIndex >= 0) {
+                val prevResult = youTubeQueue[prevIndex]
+                
+                // CHECK: Is previous item pre-prepared? Use it for instant playback
+                val preparedItem = preparedMediaItems[prevResult.videoId]
+                val preparedTrack = preparedTracks[prevResult.videoId]
+                
+                if (preparedItem != null && preparedTrack != null) {
+                    Log.d(TAG, "⚡ INSTANT PREVIOUS: Using pre-prepared MediaItem - zero delay!")
+                    youTubeQueueIndex = prevIndex
+                    currentQueue = listOf(preparedTrack)
+                    
+                    recentlyPlayedManager.addSong(
+                        id = preparedTrack.id,
+                        title = preparedTrack.title,
+                        artist = preparedTrack.artist,
+                        album = preparedTrack.album,
+                        thumbnailUri = preparedTrack.artworkUri,
+                        duration = preparedTrack.duration
+                    )
+                    
+                    // Build gapless queue: prev + current + next (if available)
+                    val queueItems = mutableListOf(preparedItem)
+                    
+                    // Add current (now prev+1) and next items
+                    for (i in 1..2) {
+                        val idx = prevIndex + i
+                        if (idx < youTubeQueue.size) {
+                            val item = youTubeQueue[idx]
+                            preparedMediaItems[item.videoId]?.let { queueItems.add(it) }
+                        }
+                    }
+                    
+                    mediaController?.apply {
+                        stop()
+                        clearMediaItems()
+                        setMediaItems(queueItems, 0, 0L)
+                        prepare()
+                        playWhenReady = true
+                        play()
+                    }
+                    
+                    prefetchAdjacentYouTubeItems(prevIndex)
+                    return
+                }
+                
+                // Fallback: Play directly
+                playYouTubeQueueItem(prevIndex)
+                return
              }
         }
         mediaController?.seekToPrevious()
@@ -567,7 +654,7 @@ class PlayerController @Inject constructor(
     }
     
     /**
-     * Play a YouTube item from cached data (instant playback)
+     * GAPLESS PLAYBACK: Play a YouTube item from cached data with instant transition
      */
     private fun playCachedYouTubeItem(result: YouTubeSearchResult, cached: CachedStreamUrl) {
         val track = Track(
@@ -592,12 +679,32 @@ class PlayerController @Inject constructor(
             duration = track.duration
         )
         
+        // Cache prepared track for future instant access
+        preparedTracks[result.videoId] = track
+        
         val mediaItem = createMediaItemForTrack(track)
+        preparedMediaItems[result.videoId] = mediaItem
+        
+        // Build gapless queue with current + next items ready
+        val queueItems = mutableListOf(mediaItem)
+        
+        // Add next 2 pre-prepared items to ExoPlayer queue for gapless playback
+        for (i in 1..2) {
+            val nextIdx = youTubeQueueIndex + i
+            if (nextIdx < youTubeQueue.size) {
+                val nextResult = youTubeQueue[nextIdx]
+                val nextPrepared = preparedMediaItems[nextResult.videoId]
+                if (nextPrepared != null) {
+                    queueItems.add(nextPrepared)
+                    Log.d(TAG, "GAPLESS: Added pre-prepared item $i to queue: ${nextResult.title}")
+                }
+            }
+        }
         
         mediaController?.apply {
             stop()
             clearMediaItems()
-            setMediaItem(mediaItem)
+            setMediaItems(queueItems, 0, 0L)
             prepare()
             playWhenReady = true
             play()
@@ -628,27 +735,68 @@ class PlayerController @Inject constructor(
     }
     
     /**
-     * Prefetch a specific YouTube queue item
+     * Prefetch a specific YouTube queue item and PRE-BUILD Track + MediaItem
      */
     private fun prefetchYouTubeItemAt(index: Int) {
         if (index < 0 || index >= youTubeQueue.size) return
         
         val item = youTubeQueue[index]
-        val cached = streamUrlCache[item.videoId]
-        if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_DURATION_MS) {
-            return // Already cached
+        
+        // Check if already fully prepared (has MediaItem ready)
+        if (preparedMediaItems.containsKey(item.videoId)) {
+            Log.d(TAG, "Already prepared: ${item.title}")
+            return
         }
         
+        // Check if URL is cached
+        val cached = streamUrlCache[item.videoId]
+        if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_DURATION_MS) {
+            // URL is cached, now build Track + MediaItem if not already
+            if (!preparedTracks.containsKey(item.videoId)) {
+                val track = Track(
+                    id = "yt_${item.videoId}",
+                    title = item.title,
+                    artist = item.artist,
+                    album = "YouTube",
+                    duration = item.duration,
+                    artworkUri = Uri.parse(item.thumbnailUrl),
+                    contentUri = Uri.parse(cached.url),
+                    source = com.audioflow.player.model.TrackSource.YOUTUBE
+                )
+                preparedTracks[item.videoId] = track
+                preparedMediaItems[item.videoId] = createMediaItemForTrack(track)
+                Log.d(TAG, "INSTANT READY: Pre-built MediaItem for ${item.title}")
+            }
+            return
+        }
+        
+        // Need to fetch URL first
         Log.d(TAG, "Prefetching YouTube item at $index: ${item.title}")
         scope.launch {
             mediaRepository.getYouTubeStreamUrl(item.videoId)
                 .onSuccess { streamInfo ->
+                    // Cache URL
                     streamUrlCache[item.videoId] = CachedStreamUrl(
                         url = streamInfo.audioStreamUrl,
                         timestamp = System.currentTimeMillis(),
                         mimeType = streamInfo.mimeType
                     )
-                    Log.d(TAG, "Prefetched stream URL for ${item.title}")
+                    
+                    // IMMEDIATELY build Track + MediaItem for instant playback
+                    val track = Track(
+                        id = "yt_${item.videoId}",
+                        title = item.title,
+                        artist = item.artist,
+                        album = "YouTube",
+                        duration = item.duration,
+                        artworkUri = Uri.parse(item.thumbnailUrl),
+                        contentUri = Uri.parse(streamInfo.audioStreamUrl),
+                        source = com.audioflow.player.model.TrackSource.YOUTUBE
+                    )
+                    preparedTracks[item.videoId] = track
+                    preparedMediaItems[item.videoId] = createMediaItemForTrack(track)
+                    
+                    Log.d(TAG, "✓ FULLY PREPARED: ${item.title} ready for instant playback")
                 }
                 .onFailure { error ->
                     Log.w(TAG, "Prefetch failed for ${item.title}: ${error.message}")

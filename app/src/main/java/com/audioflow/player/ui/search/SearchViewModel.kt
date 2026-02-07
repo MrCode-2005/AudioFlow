@@ -412,20 +412,48 @@ class SearchViewModel @Inject constructor(
             
             isRelevant
         }.sortedWith { a, b ->
-            // Sort by relevance: prioritize results with query words in title
-            val aHasQuery = queryWords.any { a.title.lowercase().contains(it) }
-            val bHasQuery = queryWords.any { b.title.lowercase().contains(it) }
+            // YouTube-like relevance sorting: prioritize songs, remixes, official tracks
+            val aLower = a.title.lowercase()
+            val bLower = b.title.lowercase()
+            val aArtist = a.artist.lowercase()
+            val bArtist = b.artist.lowercase()
             
-            val aHasOfficial = a.title.lowercase().contains("official")
-            val bHasOfficial = b.title.lowercase().contains("official")
-            
-            when {
-                aHasQuery && !bHasQuery -> -1
-                !aHasQuery && bHasQuery -> 1
-                aHasOfficial && !bHasOfficial -> -1
-                !aHasOfficial && bHasOfficial -> 1
-                else -> 0
+            // Score each result (higher = better)
+            fun score(title: String, artist: String): Int {
+                var s = 0
+                
+                // Query word match is most important (like YouTube)
+                if (queryWords.any { title.contains(it) }) s += 100
+                if (queryWords.any { artist.contains(it) }) s += 80
+                
+                // Official content is prioritized (like YouTube)
+                if (title.contains("official")) s += 50
+                if (title.contains("official audio")) s += 30
+                if (title.contains("official music video") || title.contains("official video")) s += 25
+                
+                // Music content types (songs + remixes as user requested)
+                if (title.contains("audio")) s += 20
+                if (title.contains("lyrics") || title.contains("lyric")) s += 15
+                if (title.contains("remix")) s += 15  // Keep remixes as user requested
+                if (title.contains("song")) s += 10
+                if (title.contains("music video") || title.contains("mv")) s += 10
+                if (title.contains("ft.") || title.contains("feat.")) s += 5 // Collaborations
+                if (title.contains("cover")) s += 5
+                if (title.contains("acoustic")) s += 5
+                
+                // Known music channels get boost
+                if (artist.contains("vevo")) s += 40
+                if (artist.contains("records")) s += 20
+                if (artist.contains("official")) s += 15
+                
+                return s
             }
+            
+            val aScore = score(aLower, aArtist)
+            val bScore = score(bLower, bArtist)
+            
+            // Higher score first
+            bScore.compareTo(aScore)
         }
     }
     
