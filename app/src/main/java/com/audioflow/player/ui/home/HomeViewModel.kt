@@ -47,7 +47,7 @@ data class HomeUiState(
     val allTracks: List<Track> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
-    val isDynamicMode: Boolean = false,
+    val isDynamicMode: Boolean = true, // Discover is default
     
     // Recommendations
     val trendingSongs: List<YouTubeSearchResult> = emptyList(),
