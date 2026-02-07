@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow HTTPS connections to YouTube API instances -->
+    <!-- Allow HTTPS connections with system and user certificates -->
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
@@ -8,7 +8,20 @@
         </trust-anchors>
     </base-config>
     
-    <!-- Domain configurations for API instances -->
+    <!-- YouTube/Google CDN domains - CRITICAL for streaming -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">googlevideo.com</domain>
+        <domain includeSubdomains="true">youtube.com</domain>
+        <domain includeSubdomains="true">ytimg.com</domain>
+        <domain includeSubdomains="true">ggpht.com</domain>
+        <domain includeSubdomains="true">googleusercontent.com</domain>
+        <domain includeSubdomains="true">gstatic.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+    
+    <!-- Invidious/Piped API instances -->
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">invidious.fdn.fr</domain>
         <domain includeSubdomains="true">inv.nadeko.net</domain>

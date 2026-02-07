@@ -6,6 +6,9 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -70,7 +73,7 @@ data class YouTubeVideoStreamInfo(
  */
 @Singleton
 class YouTubeExtractor @Inject constructor(
-    @Suppress("UNUSED_PARAMETER") private val cookieManager: YouTubeCookieManager
+    private val cookieManager: YouTubeCookieManager
 ) {
     
     // Custom exception types for better error handling
@@ -79,6 +82,47 @@ class YouTubeExtractor @Inject constructor(
         object RateLimited : YouTubeError()
         data class VideoUnavailable(override val message: String) : YouTubeError()
         data class NetworkError(override val message: String) : YouTubeError()
+    }
+    
+    // OkHttp client for URL validation (same config as MusicService)
+    private val validationClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .build()
+    }
+    
+    /**
+     * Validate that a stream URL is actually reachable.
+     * Returns true if URL returns 200-299 status, false otherwise.
+     */
+    private fun validateStreamUrl(url: String): Boolean {
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", YouTubeCookieManager.USER_AGENT)
+                .header("Origin", "https://www.youtube.com")
+                .header("Referer", "https://www.youtube.com/")
+                .header("Accept", "*/*")
+                .header("Accept-Encoding", "identity")
+                .header("Range", "bytes=0-1") // Request first 2 bytes only
+                .build()
+            
+            val response = validationClient.newCall(request).execute()
+            val code = response.code
+            val contentType = response.header("Content-Type")
+            val contentLength = response.header("Content-Length")
+            
+            Log.d(TAG, "URL validation: code=$code, contentType=$contentType, contentLength=$contentLength")
+            response.close()
+            
+            // Accept 200 (OK), 206 (Partial Content), or 302/303 (Redirects handled by OkHttp)
+            return code in 200..299 || code == 206
+        } catch (e: Exception) {
+            Log.e(TAG, "URL validation failed: ${e.message}")
+            return false
+        }
     }
     
     /**
@@ -265,6 +309,7 @@ class YouTubeExtractor @Inject constructor(
     
     /**
      * Extract the audio stream URL for a video using yt-dlp
+     * Includes retry logic for reliability on real devices
      */
     suspend fun extractStreamUrl(videoId: String): Result<YouTubeStreamInfo> = 
         withContext(Dispatchers.IO) {
@@ -272,7 +317,7 @@ class YouTubeExtractor @Inject constructor(
             
             // Wait for yt-dlp initialization (with timeout)
             var attempts = 0
-            while (!com.audioflow.player.AudioFlowApp.isYtDlpReady && attempts < 30) {
+            while (!com.audioflow.player.AudioFlowApp.isYtDlpReady && attempts < 50) {
                 delay(100)
                 attempts++
             }
@@ -282,102 +327,202 @@ class YouTubeExtractor @Inject constructor(
                 return@withContext Result.failure(YouTubeError.ServiceUnavailable)
             }
             
-            try {
-                val videoUrl = "https://www.youtube.com/watch?v=$videoId"
-                val request = YoutubeDLRequest(videoUrl)
-                
-                // Minimal options - let yt-dlp determine the best stream
-                request.addOption("--no-playlist")
-                
-                // Get video info
-                val videoInfo = YoutubeDL.getInstance().getInfo(request)
-                
-                if (videoInfo == null) {
-                    Log.e(TAG, "Failed to get video info for: $videoId")
-                    return@withContext Result.failure(YouTubeError.VideoUnavailable("Could not extract video info"))
-                }
-                
-                // Try to get URL - first from direct url, then from formats list
-                var streamUrl = videoInfo.url
-                var format: String? = videoInfo.ext
-                
-                // If direct URL is null, try to find audio format from formats list
-                if (streamUrl.isNullOrBlank()) {
-                    Log.d(TAG, "Direct URL is null, checking formats...")
+            // Retry logic for better reliability on real devices
+            var lastException: Exception? = null
+            repeat(3) { retryAttempt ->
+                try {
+                    val result = extractStreamUrlInternal(videoId, retryAttempt)
+                    if (result.isSuccess) {
+                        return@withContext result
+                    }
+                    lastException = result.exceptionOrNull() as? Exception
                     
-                    // Access formats through the manifest URL as fallback
-                    val manifestUrl = videoInfo.manifestUrl
-                    if (!manifestUrl.isNullOrBlank()) {
-                        Log.d(TAG, "Using manifest URL")
-                        streamUrl = manifestUrl
+                    // Don't retry for permanent errors
+                    val error = result.exceptionOrNull()
+                    if (error is YouTubeError.VideoUnavailable) {
+                        return@withContext result
                     }
-                }
-                
-                // Still no URL? Try requested formats
-                if (streamUrl.isNullOrBlank()) {
-                    val requestedFormats = videoInfo.requestedFormats
-                    if (requestedFormats != null && requestedFormats.isNotEmpty()) {
-                        // Try to find audio-only format
-                        val audioFormat = requestedFormats.find { 
-                            it.vcodec == "none" || it.vcodec == null 
-                        } ?: requestedFormats.firstOrNull()
-                        
-                        audioFormat?.let {
-                            streamUrl = it.url
-                            format = it.ext
-                            Log.d(TAG, "Found format URL from requestedFormats: ${it.formatId}")
-                        }
+                    
+                    // Wait before retry with exponential backoff
+                    if (retryAttempt < 2) {
+                        val delayMs = (retryAttempt + 1) * 500L
+                        Log.d(TAG, "Retrying extraction in ${delayMs}ms (attempt ${retryAttempt + 2}/3)")
+                        delay(delayMs)
                     }
-                }
-                
-                if (streamUrl.isNullOrBlank()) {
-                    Log.e(TAG, "No stream URL found for: $videoId (url=${videoInfo.url}, manifestUrl=${videoInfo.manifestUrl})")
-                    return@withContext Result.failure(YouTubeError.VideoUnavailable("No audio stream available. Try updating yt-dlp."))
-                }
-                
-                val title = videoInfo.title ?: "Unknown Title"
-                val artist = videoInfo.uploader ?: "Unknown Artist"
-                val duration = (videoInfo.duration?.toLong() ?: 0L) * 1000 // Convert to ms
-                val thumbnail = videoInfo.thumbnail 
-                    ?: "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
-                
-                // Determine mime type from format
-                val mimeType = when {
-                    format?.contains("opus") == true -> "audio/opus"
-                    format?.contains("webm") == true -> "audio/webm"
-                    format?.contains("m4a") == true -> "audio/mp4"
-                    else -> "audio/mp4"
-                }
-                
-                val bitrate = 128 // Default bitrate
-                
-                Log.d(TAG, "Successfully extracted stream for: $title (URL length: ${streamUrl?.length})")
-                
-                Result.success(YouTubeStreamInfo(
-                    videoId = videoId,
-                    audioStreamUrl = streamUrl!!,
-                    mimeType = mimeType,
-                    bitrate = bitrate,
-                    title = title,
-                    artist = artist,
-                    thumbnailUrl = thumbnail,
-                    duration = duration
-                ))
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Stream extraction failed: ${e.message}", e)
-                when {
-                    e.message?.contains("Video unavailable") == true ||
-                    e.message?.contains("Private video") == true ||
-                    e.message?.contains("removed") == true ->
-                        Result.failure(YouTubeError.VideoUnavailable(e.message ?: "Video unavailable"))
-                    e.message?.contains("429") == true -> 
-                        Result.failure(YouTubeError.RateLimited)
-                    else -> 
-                        Result.failure(YouTubeError.ServiceUnavailable)
+                } catch (e: Exception) {
+                    lastException = e
+                    Log.e(TAG, "Extraction attempt ${retryAttempt + 1} failed: ${e.message}")
+                    if (retryAttempt < 2) {
+                        delay((retryAttempt + 1) * 500L)
+                    }
                 }
             }
+            
+            Result.failure(lastException ?: YouTubeError.ServiceUnavailable)
         }
+    
+    /**
+     * Internal extraction logic
+     */
+    private suspend fun extractStreamUrlInternal(videoId: String, attempt: Int): Result<YouTubeStreamInfo> {
+        try {
+            val videoUrl = "https://www.youtube.com/watch?v=$videoId"
+            val request = YoutubeDLRequest(videoUrl)
+            
+            // Essential options for reliable extraction
+            request.addOption("--no-playlist")
+            request.addOption("--no-warnings")
+            request.addOption("--no-check-certificate") // Helps on some devices with cert issues
+            request.addOption("--extractor-retries", "3") // Retry individual extractors
+            request.addOption("--socket-timeout", "30") // Reasonable timeout
+            
+            // CRITICAL: Use Android player client to get mobile-friendly URLs
+            // This generates URLs signed for Android devices, avoiding 403 errors
+            request.addOption("--extractor-args", "youtube:player_client=android")
+            
+            // Use Android YouTube app User-Agent for consistency with player_client=android
+            val androidUserAgent = "com.google.android.youtube/19.09.36 (Linux; U; Android 14) gzip"
+            request.addOption("--user-agent", androidUserAgent)
+            
+            // Add cookies if available (for age-restricted/premium content)
+            val cookies = cookieManager.getCookies()
+            if (cookies.isNotEmpty()) {
+                Log.d(TAG, "Adding cookies to yt-dlp request")
+                request.addOption("--add-header", "Cookie:$cookies")
+            }
+            
+            // ALWAYS request audio-only format for reliable device playback
+            // Priority: m4a (best compatibility) > webm/opus > any audio
+            // Using explicit filtering to avoid DASH-only streams
+            val formatString = when (attempt) {
+                0 -> "bestaudio[ext=m4a][acodec!=none]/bestaudio[ext=webm][acodec!=none]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
+                1 -> "worstaudio[ext=m4a]/worstaudio[ext=webm]/worstaudio"
+                else -> "bestaudio/best"
+            }
+            request.addOption("-f", formatString)
+            Log.d(TAG, "Extraction attempt $attempt with format: $formatString")
+            
+            // Get video info
+            val videoInfo = YoutubeDL.getInstance().getInfo(request)
+            
+            if (videoInfo == null) {
+                Log.e(TAG, "Failed to get video info for: $videoId")
+                return Result.failure(YouTubeError.VideoUnavailable("Could not extract video info"))
+            }
+            
+            // Try to get URL from various sources
+            var streamUrl = videoInfo.url
+            var format: String? = videoInfo.ext
+            
+            Log.d(TAG, "VideoInfo - url: ${if (streamUrl.isNullOrBlank()) "null" else "present (${streamUrl?.length} chars)"}")
+            Log.d(TAG, "VideoInfo - ext: $format, manifestUrl: ${if (videoInfo.manifestUrl.isNullOrBlank()) "null" else "present"}")
+            
+            // Check requestedFormats first - this usually has the direct audio URL
+            if (streamUrl.isNullOrBlank()) {
+                val requestedFormats = videoInfo.requestedFormats
+                Log.d(TAG, "RequestedFormats: ${requestedFormats?.size ?: 0} formats")
+                
+                if (requestedFormats != null && requestedFormats.isNotEmpty()) {
+                    // Find audio-only format (no video codec)
+                    val audioFormat = requestedFormats.find { 
+                        (it.vcodec == "none" || it.vcodec == null) && !it.url.isNullOrBlank()
+                    } ?: requestedFormats.find { !it.url.isNullOrBlank() }
+                    
+                    audioFormat?.let {
+                        streamUrl = it.url
+                        format = it.ext
+                        Log.d(TAG, "Found format from requestedFormats: ${it.formatId}, ext: ${it.ext}")
+                    }
+                }
+            }
+            
+            // DO NOT use manifest URLs - ExoPlayer would need DASH/HLS source factory
+            // which is not compatible with our progressive streaming setup
+            if (streamUrl.isNullOrBlank() && !videoInfo.manifestUrl.isNullOrBlank()) {
+                Log.w(TAG, "WARNING: Only manifest URL available (DASH/HLS), not direct stream. Rejecting.")
+                Log.w(TAG, "Manifest URL: ${videoInfo.manifestUrl?.take(60)}...")
+                // Don't use it - it will fail with progressive source
+            }
+            
+            // Additional check: reject manifest URLs disguised as stream URLs
+            if (!streamUrl.isNullOrBlank() && 
+                (streamUrl!!.contains(".mpd") || streamUrl!!.contains(".m3u") || streamUrl!!.contains("manifest"))) {
+                Log.w(TAG, "Rejecting manifest URL masquerading as stream: ${streamUrl?.take(60)}")
+                streamUrl = null
+            }
+            
+            if (streamUrl.isNullOrBlank()) {
+                Log.e(TAG, "No direct stream URL found for: $videoId")
+                return Result.failure(YouTubeError.VideoUnavailable("No direct audio stream available. Video may require special handling."))
+            }
+            
+            val title = videoInfo.title ?: "Unknown Title"
+            val artist = videoInfo.uploader ?: "Unknown Artist"
+            val duration = (videoInfo.duration?.toLong() ?: 0L) * 1000 // Convert to ms
+            val thumbnail = videoInfo.thumbnail 
+                ?: "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+            
+            // Determine mime type from format
+            val mimeType = when {
+                format?.contains("opus") == true -> "audio/opus"
+                format?.contains("webm") == true -> "audio/webm"
+                format?.contains("m4a") == true -> "audio/mp4"
+                else -> "audio/mp4"
+            }
+            
+            val bitrate = 128 // Default bitrate
+            
+            // Log detailed URL info for debugging on devices
+            val urlInfo = if (!streamUrl.isNullOrBlank()) {
+                val prefix = streamUrl!!.take(80)
+                val hasRn = streamUrl!!.contains("&rn=")
+                val hasRange = streamUrl!!.contains("&range=")
+                val hasGooglevideo = streamUrl!!.contains("googlevideo.com")
+                "prefix=$prefix..., hasRn=$hasRn, hasRange=$hasRange, isGooglevideo=$hasGooglevideo"
+            } else "NULL URL"
+            
+            Log.d(TAG, "Stream URL extracted: $urlInfo")
+            
+            // Validate URL is reachable (do this in background - don't block on failure)
+            val isUrlValid = try {
+                validateStreamUrl(streamUrl!!)
+            } catch (e: Exception) {
+                Log.w(TAG, "URL validation exception: ${e.message}")
+                true // Proceed anyway if validation fails
+            }
+            Log.d(TAG, "URL validation result: $isUrlValid")
+            
+            if (!isUrlValid) {
+                Log.w(TAG, "WARNING: Stream URL failed validation but proceeding anyway")
+            }
+            
+            Log.d(TAG, "Successfully extracted stream for: $title (URL length: ${streamUrl?.length})")
+            
+            return Result.success(YouTubeStreamInfo(
+                videoId = videoId,
+                audioStreamUrl = streamUrl!!,
+                mimeType = mimeType,
+                bitrate = bitrate,
+                title = title,
+                artist = artist,
+                thumbnailUrl = thumbnail,
+                duration = duration
+            ))
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Stream extraction failed: ${e.message}", e)
+            return when {
+                e.message?.contains("Video unavailable") == true ||
+                e.message?.contains("Private video") == true ||
+                e.message?.contains("removed") == true ->
+                    Result.failure(YouTubeError.VideoUnavailable(e.message ?: "Video unavailable"))
+                e.message?.contains("429") == true -> 
+                    Result.failure(YouTubeError.RateLimited)
+                else -> 
+                    Result.failure(YouTubeError.ServiceUnavailable)
+            }
+        }
+    }
     
     /**
      * Extract video stream URL for background video playback

@@ -6,6 +6,9 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
@@ -30,47 +33,34 @@ class MusicService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
     
+
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "MusicService onCreate")
         
-        // Create OkHttpClient with cookie interceptor for YouTube streams
-        // Cookies are fetched dynamically per-request to ensure fresh auth
+        // Use OkHttp for reliable streaming on physical devices
+        // Use Android YouTube app User-Agent to match yt-dlp extraction (player_client=android)
+        val androidUserAgent = "com.google.android.youtube/19.09.36 (Linux; U; Android 14) gzip"
+        
         val okHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
-            .addInterceptor { chain ->
-                val originalRequest = chain.request()
-                val url = originalRequest.url.toString()
-                
-                // Add cookies only for YouTube/Google video URLs
-                val newRequest = if (url.contains("googlevideo.com") || url.contains("youtube.com")) {
-                    // Fetch fresh cookies for each request (important if user logs in after service starts)
-                    val freshCookies = cookieManager.getCookies()
-                    Log.d(TAG, "Sending request with cookies: ${if (freshCookies.isNotEmpty()) "present" else "empty"}")
-                    originalRequest.newBuilder()
-                        .header("Cookie", freshCookies)
-                        .build()
-                } else {
-                    originalRequest
-                }
-                chain.proceed(newRequest)
-            }
             .build()
-        
-        // Create OkHttp data source factory with web browser User-Agent (must match cookie authentication)
+            
+        // Create OkHttp data source factory with minimal headers
+        // Android client URLs don't need Origin/Referer like web URLs
         val okHttpDataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
-            .setUserAgent(com.audioflow.player.data.remote.YouTubeCookieManager.USER_AGENT)
+            .setUserAgent(androidUserAgent)
         
-        // Wrap with DefaultDataSource to handle both HTTP and local content:// URIs
+        // Wrap with DefaultDataSource for local file support
         val dataSourceFactory: DataSource.Factory = DefaultDataSource.Factory(this, okHttpDataSourceFactory)
         
-        // Create media source factory with OkHttp data source
-        val mediaSourceFactory = DefaultMediaSourceFactory(this)
-            .setDataSourceFactory(dataSourceFactory)
+        // Create media source factory with OkHttp
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
         
         // Create ExoPlayer with custom media source factory and audio track selection
         player = ExoPlayer.Builder(this)
@@ -88,9 +78,57 @@ class MusicService : MediaSessionService() {
             .apply {
                 // Ensure audio volume is at max
                 volume = 1.0f
+                
+                // Add comprehensive error and state listener for debugging
+                addListener(object : Player.Listener {
+                    override fun onPlayerError(error: PlaybackException) {
+                        Log.e(TAG, "=== EXOPLAYER ERROR ===")
+                        Log.e(TAG, "Error code: ${error.errorCode}")
+                        Log.e(TAG, "Error message: ${error.message}")
+                        Log.e(TAG, "Error cause: ${error.cause?.message}")
+                        error.cause?.printStackTrace()
+                    }
+                    
+                    override fun onPlayerErrorChanged(error: PlaybackException?) {
+                        if (error != null) {
+                            Log.e(TAG, "Player error changed: ${error.errorCode} - ${error.message}")
+                        }
+                    }
+                    
+                    override fun onPlaybackStateChanged(state: Int) {
+                        val stateName = when (state) {
+                            Player.STATE_IDLE -> "IDLE"
+                            Player.STATE_BUFFERING -> "BUFFERING"
+                            Player.STATE_READY -> "READY"
+                            Player.STATE_ENDED -> "ENDED"
+                            else -> "UNKNOWN"
+                        }
+                        Log.d(TAG, "=== ExoPlayer state: $stateName ===")
+                        
+                        // Log additional info when buffering
+                        if (state == Player.STATE_BUFFERING) {
+                            Log.d(TAG, "Buffering... duration: $duration, position: $currentPosition")
+                        }
+                        if (state == Player.STATE_READY) {
+                            Log.d(TAG, "Ready to play! duration: $duration, playWhenReady: $playWhenReady")
+                        }
+                    }
+                    
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        Log.d(TAG, "isPlaying changed to: $isPlaying")
+                    }
+                    
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        Log.d(TAG, "Media transition: ${mediaItem?.mediaId}, reason: $reason")
+                        mediaItem?.localConfiguration?.let { config ->
+                            Log.d(TAG, "URI: ${config.uri?.toString()?.take(100)}...")
+                            Log.d(TAG, "MIME type: ${config.mimeType}")
+                        }
+                    }
+                })
             }
         
-        Log.d(TAG, "ExoPlayer created successfully with audio focus")
+        Log.d(TAG, "ExoPlayer created successfully with audio focus and error listener")
         
         // Create pending intent for launching app from notification
         val sessionActivity = PendingIntent.getActivity(
