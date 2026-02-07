@@ -69,7 +69,7 @@ class PlayerController @Inject constructor(
     // Cache for extracted stream URLs to avoid re-extraction
     private val streamUrlCache = mutableMapOf<String, CachedStreamUrl>()
     private data class CachedStreamUrl(val url: String, val timestamp: Long, val mimeType: String? = null)
-    private val CACHE_DURATION_MS = 5 * 60 * 1000L // 5 minutes
+    private val CACHE_DURATION_MS = 10 * 60 * 1000L // 10 minutes - longer cache for faster playback
     
     /**
      * Create a MediaItem with proper MIME type hints for YouTube streams.
@@ -605,18 +605,25 @@ class PlayerController @Inject constructor(
     }
     
     /**
-     * Prefetch both next and previous YouTube items for smooth navigation
+     * AGGRESSIVE PREFETCH: Prefetch 5 songs ahead and 2 behind for buttery smooth navigation
      */
     private fun prefetchAdjacentYouTubeItems(currentIndex: Int) {
-        // Prefetch next 2 items
-        listOf(currentIndex + 1, currentIndex + 2).forEach { nextIndex ->
+        Log.d(TAG, "Starting aggressive prefetch from index $currentIndex")
+        
+        // Prefetch next 5 items for smooth forward navigation
+        for (i in 1..5) {
+            val nextIndex = currentIndex + i
             if (nextIndex < youTubeQueue.size) {
                 prefetchYouTubeItemAt(nextIndex)
             }
         }
-        // Prefetch previous item
-        if (currentIndex > 0) {
-            prefetchYouTubeItemAt(currentIndex - 1)
+        
+        // Prefetch previous 2 items for smooth backward navigation
+        for (i in 1..2) {
+            val prevIndex = currentIndex - i
+            if (prevIndex >= 0) {
+                prefetchYouTubeItemAt(prevIndex)
+            }
         }
     }
     
