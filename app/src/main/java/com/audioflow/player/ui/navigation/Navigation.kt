@@ -162,7 +162,14 @@ fun AudioFlowNavigation() {
                         navController.navigate(Screen.Settings.route)
                     },
                     onNavigateToSearch = {
-                        navController.navigate(Screen.Search.route)
+                        // Use same navigation pattern as bottom nav for proper back stack
+                        navController.navigate(Screen.Search.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 )
             }
