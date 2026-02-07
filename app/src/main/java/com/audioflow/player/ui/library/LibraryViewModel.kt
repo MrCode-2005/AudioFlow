@@ -83,8 +83,12 @@ class LibraryViewModel @Inject constructor(
             try {
                 mediaRepository.refreshLocalMusic()
                 
+                // Filter to only show LOCAL tracks (not YouTube)
+                val allTracks = mediaRepository.getAllTracks()
+                val localTracks = allTracks.filter { it.source == com.audioflow.player.model.TrackSource.LOCAL }
+                
                 _uiState.value = _uiState.value.copy(
-                    tracks = mediaRepository.getAllTracks(),
+                    tracks = localTracks,
                     albums = mediaRepository.getAllAlbums(),
                     artists = mediaRepository.getAllArtists(),
                     isLoading = false
