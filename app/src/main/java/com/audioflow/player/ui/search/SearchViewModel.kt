@@ -19,10 +19,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import android.net.Uri
 import android.provider.MediaStore
 import android.content.ContentUris
+import android.util.Log
 import javax.inject.Inject
+
+private const val TAG = "SearchViewModel"
 
 /**
  * Search mode options
@@ -100,6 +105,7 @@ class SearchViewModel @Inject constructor(
                 albums = emptyList(),
                 artists = emptyList(),
                 youtubeResults = emptyList(),
+                filteredResults = emptyList(),
                 youtubeMetadata = null,
                 youtubeError = null,
                 isSearching = false,
@@ -112,12 +118,13 @@ class SearchViewModel @Inject constructor(
         if (_uiState.value.searchMode == SearchMode.YOUTUBE) {
             _uiState.value = _uiState.value.copy(
                 youtubeResults = emptyList(),
+                filteredResults = emptyList(),
                 isSearching = true
             )
         }
         
-        // Debounce: 200ms for YouTube (reduced from 500ms), 150ms for local
-    val debounceTime = if (_uiState.value.searchMode == SearchMode.YOUTUBE) 200L else 150L
+        // FAST DEBOUNCE: 100ms for YouTube, 80ms for local (minimum for typing)
+        val debounceTime = if (_uiState.value.searchMode == SearchMode.YOUTUBE) 100L else 80L
         searchJob = viewModelScope.launch {
             delay(debounceTime)
             performSearch(query)
@@ -139,6 +146,7 @@ class SearchViewModel @Inject constructor(
             albums = emptyList(),
             artists = emptyList(),
             youtubeResults = emptyList(),
+            filteredResults = emptyList(),
             youtubeMetadata = null,
             youtubeError = null,
             hasResults = false
@@ -160,6 +168,7 @@ class SearchViewModel @Inject constructor(
                 albums = emptyList(),
                 artists = emptyList(),
                 youtubeResults = emptyList(),
+                filteredResults = emptyList(),
                 youtubeMetadata = null,
                 youtubeError = null,
                 hasResults = false
@@ -227,6 +236,7 @@ class SearchViewModel @Inject constructor(
                 albums = emptyList(),
                 artists = emptyList(),
                 youtubeResults = emptyList(),
+                filteredResults = emptyList(),
                 youtubeMetadata = null,
                 youtubeError = null,
                 isSearching = false,
@@ -259,6 +269,7 @@ class SearchViewModel @Inject constructor(
             albums = albums,
             artists = artists,
             youtubeResults = emptyList(),
+            filteredResults = emptyList(),
             youtubeMetadata = null,
             isSearching = false,
             hasResults = tracks.isNotEmpty() || albums.isNotEmpty() || artists.isNotEmpty()
@@ -269,30 +280,47 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isYouTubeLoading = true)
             
-            mediaRepository.searchYouTube(query)
+            // Add "song" or "official audio" to help find music, not vlogs
+            val enhancedQuery = if (query.contains("song", ignoreCase = true) || 
+                                    query.contains("music", ignoreCase = true) ||
+                                    query.contains("audio", ignoreCase = true) ||
+                                    query.contains("official", ignoreCase = true)) {
+                query
+            } else {
+                "$query song official audio"
+            }
+            
+            Log.d(TAG, "Searching YouTube with enhanced query: $enhancedQuery")
+            
+            mediaRepository.searchYouTube(enhancedQuery)
                 .onSuccess { results ->
                     // Save to search history on successful search
                     searchHistoryManager.addSearch(query)
                     
+                    // IMMEDIATE FILTERING: Remove unrelated content
+                    val filteredForRelevance = filterForRelevance(results, query)
+                    
+                    Log.d(TAG, "Search returned ${results.size} results, filtered to ${filteredForRelevance.size} relevant")
+                    
                     _uiState.value = _uiState.value.copy(
-                        youtubeResults = results,
-                        filteredResults = results, // Set initially, then filter
+                        youtubeResults = filteredForRelevance,
+                        filteredResults = filteredForRelevance, // Set initially, then filter
                         tracks = emptyList(),
                         albums = emptyList(),
                         artists = emptyList(),
                         youtubeMetadata = null,
                         isSearching = false,
                         isYouTubeLoading = false,
-                        hasResults = results.isNotEmpty(),
+                        hasResults = filteredForRelevance.isNotEmpty(),
                         shouldDismissKeyboard = true
                     )
-                    // Apply filter after setting results
+                    // Apply content filter after setting results
                     applyContentFilter()
                     
-                    // PREFETCH: Pre-extract first 2 results for instant playback
-                    if (results.isNotEmpty()) {
-                        playerController.setYouTubeQueue(results, -1) // Set queue without playing
-                        prefetchFirstSearchResults(results.take(2))
+                    // AGGRESSIVE PREFETCH: Pre-extract first 5 results for instant playback
+                    if (filteredForRelevance.isNotEmpty()) {
+                        playerController.setYouTubeQueue(filteredForRelevance, -1) // Set queue without playing
+                        prefetchFirstSearchResults(filteredForRelevance.take(5))
                     }
                 }
                 .onFailure { error ->
@@ -305,11 +333,98 @@ class SearchViewModel @Inject constructor(
                 }
                 _uiState.value = _uiState.value.copy(
                     youtubeResults = emptyList(),
+                    filteredResults = emptyList(),
                     youtubeError = friendlyMessage,
                     isSearching = false,
                     isYouTubeLoading = false,
                     hasResults = false
                 )
+            }
+        }
+    }
+    
+    /**
+     * Filter search results for relevance - remove vlogs, interviews, unrelated content
+     */
+    private fun filterForRelevance(results: List<YouTubeSearchResult>, query: String): List<YouTubeSearchResult> {
+        val queryLower = query.lowercase()
+        val queryWords = queryLower.split(" ").filter { it.length > 2 }
+        
+        // Negative filters - these indicate non-music content
+        val excludedTerms = setOf(
+            "interview", "behind the scenes", "making of", "documentary",
+            "podcast", "vlog", "reaction", "tutorial", "lesson", "how to",
+            "unboxing", "review", "trailer", "movie clip", "gameplay",
+            "live stream", "q&a", "talk show", "news", "compilation funny"
+        )
+        
+        // Positive signals - these indicate actual music
+        val musicIndicators = setOf(
+            "official", "audio", "lyrics", "lyric", "music video", 
+            "mv", "song", "track", "album", "single", "ft.", "feat.",
+            "remix", "cover", "acoustic", "live performance"
+        )
+        
+        return results.filter { result ->
+            val titleLower = result.title.lowercase()
+            val artistLower = result.artist.lowercase()
+            
+            // Check for excluded terms
+            val hasExcludedTerm = excludedTerms.any { term -> 
+                titleLower.contains(term) 
+            }
+            if (hasExcludedTerm) {
+                Log.d(TAG, "Filtering out (excluded term): ${result.title}")
+                return@filter false
+            }
+            
+            // Duration filter - very long videos (> 20 min) are likely not songs
+            if (result.duration > 20 * 60 * 1000L) {
+                Log.d(TAG, "Filtering out (too long): ${result.title}")
+                return@filter false
+            }
+            
+            // Check relevance to query
+            val hasQueryWord = queryWords.any { word ->
+                titleLower.contains(word) || artistLower.contains(word)
+            }
+            
+            // Check for music indicators
+            val hasMusicIndicator = musicIndicators.any { indicator ->
+                titleLower.contains(indicator)
+            }
+            
+            // Accept if:
+            // 1. Title contains query words, OR
+            // 2. Has music indicators, OR  
+            // 3. Artist contains query words
+            // 4. Is from known music channels (contains "vevo", "records", "music", etc)
+            val isFromMusicChannel = artistLower.contains("vevo") || 
+                                     artistLower.contains("records") ||
+                                     artistLower.contains("music") ||
+                                     artistLower.contains("official")
+            
+            val isRelevant = hasQueryWord || hasMusicIndicator || isFromMusicChannel
+            
+            if (!isRelevant) {
+                Log.d(TAG, "Filtering out (not relevant): ${result.title}")
+            }
+            
+            isRelevant
+        }.sortedWith { a, b ->
+            // Sort by relevance: prioritize results with query words in title
+            val aHasQuery = queryWords.any { a.title.lowercase().contains(it) }
+            val bHasQuery = queryWords.any { b.title.lowercase().contains(it) }
+            
+            val aHasOfficial = a.title.lowercase().contains("official")
+            val bHasOfficial = b.title.lowercase().contains("official")
+            
+            when {
+                aHasQuery && !bHasQuery -> -1
+                !aHasQuery && bHasQuery -> 1
+                aHasOfficial && !bHasOfficial -> -1
+                !aHasOfficial && bHasOfficial -> 1
+                else -> 0
             }
         }
     }
@@ -480,18 +595,26 @@ class SearchViewModel @Inject constructor(
     }
     
     /**
-     * Prefetch stream URLs for first search results in background
-     * This enables instant playback when user clicks a top result
+     * AGGRESSIVE PREFETCH: Pre-extract first 5 results in parallel for instant playback
      */
     private fun prefetchFirstSearchResults(results: List<YouTubeSearchResult>) {
         viewModelScope.launch {
-            results.forEach { result ->
-                // Fire and forget - extract in background
-                mediaRepository.getYouTubeStreamUrl(result.videoId)
-                    .onSuccess {
-                        android.util.Log.d("SearchViewModel", "Prefetched: ${result.title}")
-                    }
-            }
+            Log.d(TAG, "Prefetching ${results.size} search results in parallel...")
+            
+            // Launch all prefetches in parallel for maximum speed
+            results.map { result ->
+                async {
+                    mediaRepository.getYouTubeStreamUrl(result.videoId)
+                        .onSuccess {
+                            Log.d(TAG, "✓ Prefetched: ${result.title}")
+                        }
+                        .onFailure {
+                            Log.w(TAG, "✗ Prefetch failed: ${result.title}")
+                        }
+                }
+            }.awaitAll()
+            
+            Log.d(TAG, "All prefetches completed")
         }
     }
 }
