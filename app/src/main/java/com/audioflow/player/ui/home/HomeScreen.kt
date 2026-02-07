@@ -21,12 +21,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.audioflow.player.data.local.RecentlyPlayedSong
+import com.audioflow.player.data.remote.YouTubeSearchResult
 import com.audioflow.player.model.Track
 import com.audioflow.player.ui.components.*
 import com.audioflow.player.ui.theme.*
@@ -43,18 +48,10 @@ fun HomeScreen(
     val playbackState by viewModel.playbackState.collectAsState()
     val recentlyPlayedSongs by viewModel.recentlyPlayedSongs.collectAsState()
     
-    // Load music when screen is displayed
+    // Load music and recommendations when screen is displayed
     LaunchedEffect(Unit) {
         viewModel.loadMusic()
-    }
-    
-    // Navigate to Search when Discover mode is enabled
-    LaunchedEffect(uiState.isDynamicMode) {
-        if (uiState.isDynamicMode) {
-            onNavigateToSearch()
-            // Reset mode after navigation
-            viewModel.toggleContentMode()
-        }
+        viewModel.loadRecommendations()
     }
     
     Box(
@@ -67,7 +64,7 @@ fun HomeScreen(
                 modifier = Modifier.align(Alignment.Center),
                 color = SpotifyGreen
             )
-        } else if (uiState.allTracks.isEmpty()) {
+        } else if (uiState.allTracks.isEmpty() && uiState.trendingSongs.isEmpty()) {
             Column(modifier = Modifier.fillMaxSize()) {
                 HomeHeader(onNavigateToSettings = onNavigateToSettings)
                 Box(modifier = Modifier.weight(1f)) {
@@ -84,13 +81,125 @@ fun HomeScreen(
                 // Header with toggle
                 item {
                     HomeHeader(
-                        isDynamicMode = uiState.isDynamicMode,
-                        onToggleMode = { viewModel.toggleContentMode() },
+                        onNavigateToSearch = onNavigateToSearch,
                         onNavigateToSettings = onNavigateToSettings
                     )
                 }
                 
-                // Recently Played Songs (from RecentlyPlayedManager)
+                // ==================== TRENDING SECTION ====================
+                if (uiState.trendingSongs.isNotEmpty() || uiState.isTrendingLoading) {
+                    item {
+                        SectionHeader(title = "🔥 Trending Now")
+                    }
+                    
+                    item {
+                        if (uiState.isTrendingLoading) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(160.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = SpotifyGreen)
+                            }
+                        } else {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(uiState.trendingSongs) { song ->
+                                    TrendingSongCard(
+                                        song = song,
+                                        onClick = {
+                                            viewModel.playYouTubeResult(song, uiState.trendingSongs)
+                                            onNavigateToPlayer()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    
+                    item { Spacer(modifier = Modifier.height(24.dp)) }
+                }
+                
+                // ==================== AUTO PLAYLISTS ====================
+                if (uiState.trendingPlaylists.isNotEmpty()) {
+                    item {
+                        SectionHeader(title = "📀 Made For You")
+                    }
+                    
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(uiState.trendingPlaylists) { playlist ->
+                                AutoPlaylistCard(
+                                    playlist = playlist,
+                                    onClick = {
+                                        viewModel.playTrendingPlaylist(playlist)
+                                        onNavigateToPlayer()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    
+                    item { Spacer(modifier = Modifier.height(24.dp)) }
+                }
+                
+                // ==================== GENRE CATEGORIES ====================
+                item {
+                    SectionHeader(title = "🎵 Browse by Genre")
+                }
+                
+                item {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(uiState.genreCategories) { index, category ->
+                            GenreChip(
+                                category = category,
+                                onClick = {
+                                    viewModel.loadGenreCategory(index)
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                // Show loaded genre category songs
+                uiState.genreCategories.forEachIndexed { index, category ->
+                    if (category.songs.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            SectionHeader(title = "${category.emoji} ${category.name}")
+                        }
+                        
+                        item {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(category.songs) { song ->
+                                    GenreSongCard(
+                                        song = song,
+                                        onClick = {
+                                            viewModel.playGenreCategory(category, category.songs.indexOf(song))
+                                            onNavigateToPlayer()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                item { Spacer(modifier = Modifier.height(24.dp)) }
+                
+                // ==================== RECENTLY PLAYED ====================
                 if (recentlyPlayedSongs.isNotEmpty()) {
                     item {
                         SectionHeader(title = "Recently Played")
@@ -110,66 +219,42 @@ fun HomeScreen(
                         }
                     }
                     
-                    item {
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
                 }
                 
-                // Recent Albums
-                if (uiState.recentAlbums.isNotEmpty()) {
+                // ==================== LOCAL SONGS ====================
+                if (uiState.allTracks.isNotEmpty()) {
                     item {
-                        SectionHeader(title = "Recently Played")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Your Library",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = TextPrimary
+                            )
+                            
+                            PlayButton(
+                                isPlaying = playbackState.isPlaying,
+                                onClick = { viewModel.playAllTracks() },
+                                size = ButtonSize.MEDIUM
+                            )
+                        }
                     }
                     
-                    item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(uiState.recentAlbums) { album ->
-                                AlbumCard(
-                                    title = album.name,
-                                    subtitle = album.artist,
-                                    artworkUri = album.artworkUri,
-                                    onClick = { /* Navigate to album */ }
-                                )
+                    itemsIndexed(uiState.allTracks.take(20)) { index, track ->
+                        TrackListItem(
+                            track = track,
+                            onClick = {
+                                viewModel.playAllTracks(index)
+                                onTrackClick(track)
                             }
-                        }
-                    }
-                }
-                
-                // All Songs Header
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "All Songs",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = TextPrimary
-                        )
-                        
-                        PlayButton(
-                            isPlaying = playbackState.isPlaying,
-                            onClick = { viewModel.playAllTracks() },
-                            size = ButtonSize.MEDIUM
                         )
                     }
-                }
-                
-                // Track list
-                itemsIndexed(uiState.allTracks) { index, track ->
-                    TrackListItem(
-                        track = track,
-                        onClick = {
-                            viewModel.playAllTracks(index)
-                            onTrackClick(track)
-                        }
-                    )
                 }
             }
         }
@@ -192,10 +277,189 @@ fun HomeScreen(
     }
 }
 
+// ==================== RECOMMENDATION UI COMPONENTS ====================
+
+@Composable
+private fun TrendingSongCard(
+    song: YouTubeSearchResult,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(140.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(140.dp)
+                .clip(RoundedCornerShape(12.dp))
+        ) {
+            AsyncImage(
+                model = song.thumbnailUrl,
+                contentDescription = song.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            // Trending badge
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(SpotifyGreen, RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = "🔥",
+                    fontSize = 12.sp
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = song.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
+        
+        Text(
+            text = song.artist,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun AutoPlaylistCard(
+    playlist: TrendingPlaylist,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .width(160.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = SpotifySurfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Emoji cover
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(SpotifyGreen.copy(alpha = 0.8f), SpotifyGreen.copy(alpha = 0.3f))
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = playlist.coverEmoji,
+                    fontSize = 36.sp
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Text(
+                text = playlist.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            
+            Text(
+                text = "${playlist.songs.size} songs",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun GenreChip(
+    category: GenreCategory,
+    onClick: () -> Unit
+) {
+    val isLoaded = category.songs.isNotEmpty()
+    
+    FilterChip(
+        selected = isLoaded,
+        onClick = onClick,
+        label = { 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(category.emoji)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(category.name)
+                if (category.isLoading) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(12.dp),
+                        strokeWidth = 2.dp,
+                        color = SpotifyGreen
+                    )
+                }
+            }
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = SpotifyGreen,
+            selectedLabelColor = SpotifyBlack,
+            containerColor = SpotifySurfaceVariant,
+            labelColor = TextPrimary
+        )
+    )
+}
+
+@Composable
+private fun GenreSongCard(
+    song: YouTubeSearchResult,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(120.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        AsyncImage(
+            model = song.thumbnailUrl,
+            contentDescription = song.title,
+            modifier = Modifier
+                .size(120.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = song.title,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
 @Composable
 private fun HomeHeader(
-    isDynamicMode: Boolean = false,
-    onToggleMode: () -> Unit = {},
+    onNavigateToSearch: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {}
 ) {
     Column(
@@ -241,7 +505,7 @@ private fun HomeHeader(
             }
         }
         
-        // Local/Dynamic toggle
+        // Local/Discover toggle
         Row(
             modifier = Modifier
                 .padding(top = 12.dp)
@@ -251,8 +515,8 @@ private fun HomeHeader(
             verticalAlignment = Alignment.CenterVertically
         ) {
             FilterChip(
-                selected = !isDynamicMode,
-                onClick = { if (isDynamicMode) onToggleMode() },
+                selected = true,
+                onClick = { },
                 label = { Text("Local") },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = SpotifyGreen,
@@ -261,8 +525,8 @@ private fun HomeHeader(
                 modifier = Modifier.weight(1f)
             )
             FilterChip(
-                selected = isDynamicMode,
-                onClick = { if (!isDynamicMode) onToggleMode() },
+                selected = false,
+                onClick = { onNavigateToSearch() },
                 label = { Text("Discover") },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = SpotifyGreen,
@@ -285,7 +549,6 @@ private fun RecentSongCard(
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Thumbnail
         AsyncImage(
             model = song.thumbnailUri?.let { Uri.parse(it) },
             contentDescription = song.title,
@@ -297,7 +560,6 @@ private fun RecentSongCard(
         
         Spacer(modifier = Modifier.height(8.dp))
         
-        // Title
         Text(
             text = song.title,
             style = MaterialTheme.typography.bodyMedium,
@@ -306,7 +568,6 @@ private fun RecentSongCard(
             overflow = TextOverflow.Ellipsis
         )
         
-        // Artist
         Text(
             text = song.artist,
             style = MaterialTheme.typography.bodySmall,
