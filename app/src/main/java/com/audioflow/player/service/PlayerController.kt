@@ -4,10 +4,13 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.audioflow.player.data.remote.YouTubeSearchResult
@@ -65,8 +68,48 @@ class PlayerController @Inject constructor(
     
     // Cache for extracted stream URLs to avoid re-extraction
     private val streamUrlCache = mutableMapOf<String, CachedStreamUrl>()
-    private data class CachedStreamUrl(val url: String, val timestamp: Long)
+    private data class CachedStreamUrl(val url: String, val timestamp: Long, val mimeType: String? = null)
     private val CACHE_DURATION_MS = 5 * 60 * 1000L // 5 minutes
+    
+    /**
+     * Create a MediaItem with proper MIME type hints for YouTube streams.
+     * This is essential for ExoPlayer to properly decode YouTube audio on real devices.
+     */
+    @OptIn(UnstableApi::class)
+    private fun createMediaItemForTrack(track: Track): MediaItem {
+        val isYouTube = track.source == com.audioflow.player.model.TrackSource.YOUTUBE
+        val uri = track.contentUri
+        
+        val builder = MediaItem.Builder()
+            .setUri(uri)
+            .setMediaId(track.id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(track.title)
+                    .setArtist(track.artist)
+                    .setAlbumTitle(track.album)
+                    .setArtworkUri(track.artworkUri)
+                    .build()
+            )
+        
+        // For YouTube streams, set MIME type hint to help ExoPlayer decode properly
+        if (isYouTube) {
+            val urlString = uri.toString()
+            val mimeType = when {
+                urlString.contains("mime=audio%2Fwebm") || urlString.contains("mime=audio/webm") -> MimeTypes.AUDIO_WEBM
+                urlString.contains("mime=audio%2Fmp4") || urlString.contains("mime=audio/mp4") -> MimeTypes.AUDIO_MP4
+                urlString.contains(".m4a") -> MimeTypes.AUDIO_MP4
+                urlString.contains(".webm") -> MimeTypes.AUDIO_WEBM
+                urlString.contains(".opus") -> MimeTypes.AUDIO_OPUS
+                // Default to MP4 for googlevideo.com URLs
+                else -> MimeTypes.AUDIO_MP4
+            }
+            Log.d(TAG, "YouTube stream MIME type hint: $mimeType")
+            builder.setMimeType(mimeType)
+        }
+        
+        return builder.build()
+    }
     
     init {
         // Initialize immediately
@@ -215,18 +258,7 @@ class PlayerController @Inject constructor(
             duration = track.duration
         )
         
-        val mediaItem = MediaItem.Builder()
-            .setUri(track.contentUri)
-            .setMediaId(track.id)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(track.title)
-                    .setArtist(track.artist)
-                    .setAlbumTitle(track.album)
-                    .setArtworkUri(track.artworkUri)
-                    .build()
-            )
-            .build()
+        val mediaItem = createMediaItemForTrack(track)
         
         mediaController?.apply {
             stop()
@@ -346,22 +378,23 @@ class PlayerController @Inject constructor(
     private fun setQueueInternal(tracks: List<Track>, startIndex: Int) {
         currentQueue = tracks
         
+        // Save the starting track to recently played
+        if (startIndex >= 0 && startIndex < tracks.size) {
+            val track = tracks[startIndex]
+            recentlyPlayedManager.addSong(
+                id = track.id,
+                title = track.title,
+                artist = track.artist,
+                album = track.album,
+                thumbnailUri = track.artworkUri,
+                duration = track.duration
+            )
+        }
+        
         val mediaItems = tracks.map { track ->
             Log.d(TAG, "Creating MediaItem for: ${track.title}")
             Log.d(TAG, "URI: ${track.contentUri}")
-            
-            MediaItem.Builder()
-                .setUri(track.contentUri)
-                .setMediaId(track.id)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(track.title)
-                        .setArtist(track.artist)
-                        .setAlbumTitle(track.album)
-                        .setArtworkUri(track.artworkUri)
-                        .build()
-                )
-                .build()
+            createMediaItemForTrack(track)
         }
         
         mediaController?.apply {
@@ -463,6 +496,7 @@ class PlayerController @Inject constructor(
     
     /**
      * Play a specific item from the YouTube queue with on-demand stream extraction
+     * OPTIMIZED: Checks cache first for instant playback
      */
     private fun playYouTubeQueueItem(index: Int) {
         clearPlaylistQueue() // Ensure mutually exclusive
@@ -471,28 +505,45 @@ class PlayerController @Inject constructor(
         val result = youTubeQueue[index]
         Log.d(TAG, "Playing YouTube queue item at index $index: ${result.title}")
         
-        isExtractingStream = true
         youTubeQueueIndex = index
+        
+        // CHECK CACHE FIRST for instant playback
+        val cached = streamUrlCache[result.videoId]
+        if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_DURATION_MS) {
+            Log.d(TAG, "Using CACHED stream URL for ${result.title} (instant playback!)")
+            playCachedYouTubeItem(result, cached)
+            // Prefetch next items
+            prefetchAdjacentYouTubeItems(index)
+            return
+        }
+        
+        // No cache - extract fresh URL
+        isExtractingStream = true
         
         scope.launch {
             mediaRepository.getYouTubeStreamUrl(result.videoId)
                 .onSuccess { streamInfo ->
+                    // Cache the URL for future use
+                    streamUrlCache[result.videoId] = CachedStreamUrl(
+                        url = streamInfo.audioStreamUrl,
+                        timestamp = System.currentTimeMillis(),
+                        mimeType = streamInfo.mimeType
+                    )
+                    
                     val track = mediaRepository.createTrackFromYouTube(streamInfo)
-                    // Play as single track but keep YouTube queue context
                     currentQueue = listOf(track)
                     
-                    val mediaItem = MediaItem.Builder()
-                        .setUri(track.contentUri)
-                        .setMediaId(track.id)
-                        .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(track.title)
-                                .setArtist(track.artist)
-                                .setAlbumTitle(track.album)
-                                .setArtworkUri(track.artworkUri)
-                                .build()
-                        )
-                        .build()
+                    // Save to recently played
+                    recentlyPlayedManager.addSong(
+                        id = track.id,
+                        title = track.title,
+                        artist = track.artist,
+                        album = track.album,
+                        thumbnailUri = track.artworkUri,
+                        duration = track.duration
+                    )
+                    
+                    val mediaItem = createMediaItemForTrack(track)
                     
                     mediaController?.apply {
                         stop()
@@ -503,11 +554,126 @@ class PlayerController @Inject constructor(
                         play()
                     }
                     isExtractingStream = false
+                    
+                    // Prefetch adjacent items for next/prev
+                    prefetchAdjacentYouTubeItems(index)
                 }
                 .onFailure { error ->
                     Log.e(TAG, "Failed to extract YouTube stream: ${error.message}")
                     _error.value = "Failed to play: ${error.message}"
                     isExtractingStream = false
+                }
+        }
+    }
+    
+    /**
+     * Play a YouTube item from cached data (instant playback)
+     */
+    private fun playCachedYouTubeItem(result: YouTubeSearchResult, cached: CachedStreamUrl) {
+        val track = Track(
+            id = "yt_${result.videoId}",
+            title = result.title,
+            artist = result.artist,
+            album = "YouTube",
+            duration = result.duration,
+            artworkUri = Uri.parse(result.thumbnailUrl),
+            contentUri = Uri.parse(cached.url),
+            source = com.audioflow.player.model.TrackSource.YOUTUBE
+        )
+        currentQueue = listOf(track)
+        
+        // Save to recently played
+        recentlyPlayedManager.addSong(
+            id = track.id,
+            title = track.title,
+            artist = track.artist,
+            album = track.album,
+            thumbnailUri = track.artworkUri,
+            duration = track.duration
+        )
+        
+        val mediaItem = createMediaItemForTrack(track)
+        
+        mediaController?.apply {
+            stop()
+            clearMediaItems()
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
+            play()
+        }
+    }
+    
+    /**
+     * Prefetch both next and previous YouTube items for smooth navigation
+     */
+    private fun prefetchAdjacentYouTubeItems(currentIndex: Int) {
+        // Prefetch next 2 items
+        listOf(currentIndex + 1, currentIndex + 2).forEach { nextIndex ->
+            if (nextIndex < youTubeQueue.size) {
+                prefetchYouTubeItemAt(nextIndex)
+            }
+        }
+        // Prefetch previous item
+        if (currentIndex > 0) {
+            prefetchYouTubeItemAt(currentIndex - 1)
+        }
+    }
+    
+    /**
+     * Prefetch a specific YouTube queue item
+     */
+    private fun prefetchYouTubeItemAt(index: Int) {
+        if (index < 0 || index >= youTubeQueue.size) return
+        
+        val item = youTubeQueue[index]
+        val cached = streamUrlCache[item.videoId]
+        if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_DURATION_MS) {
+            return // Already cached
+        }
+        
+        Log.d(TAG, "Prefetching YouTube item at $index: ${item.title}")
+        scope.launch {
+            mediaRepository.getYouTubeStreamUrl(item.videoId)
+                .onSuccess { streamInfo ->
+                    streamUrlCache[item.videoId] = CachedStreamUrl(
+                        url = streamInfo.audioStreamUrl,
+                        timestamp = System.currentTimeMillis(),
+                        mimeType = streamInfo.mimeType
+                    )
+                    Log.d(TAG, "Prefetched stream URL for ${item.title}")
+                }
+                .onFailure { error ->
+                    Log.w(TAG, "Prefetch failed for ${item.title}: ${error.message}")
+                }
+        }
+    }
+    
+    /**
+     * Prefetch the next YouTube queue item's stream URL for seamless playback
+     */
+    private fun prefetchNextYouTubeQueueItem(currentIndex: Int) {
+        val nextIndex = currentIndex + 1
+        if (nextIndex >= youTubeQueue.size) return
+        
+        val nextResult = youTubeQueue[nextIndex]
+        val cached = streamUrlCache[nextResult.videoId]
+        if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_DURATION_MS) {
+            return // Already cached
+        }
+        
+        Log.d(TAG, "Prefetching next YouTube queue item: ${nextResult.title}")
+        scope.launch {
+            mediaRepository.getYouTubeStreamUrl(nextResult.videoId)
+                .onSuccess { streamInfo ->
+                    streamUrlCache[nextResult.videoId] = CachedStreamUrl(
+                        url = streamInfo.audioStreamUrl,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    Log.d(TAG, "Prefetched stream URL for ${nextResult.title}")
+                }
+                .onFailure { error ->
+                    Log.w(TAG, "Prefetch failed for ${nextResult.title}: ${error.message}")
                 }
         }
     }
@@ -542,18 +708,7 @@ class PlayerController @Inject constructor(
     fun addToQueue(track: Track) {
         currentQueue = currentQueue + track
         
-        val mediaItem = MediaItem.Builder()
-            .setUri(track.contentUri)
-            .setMediaId(track.id)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(track.title)
-                    .setArtist(track.artist)
-                    .setAlbumTitle(track.album)
-                    .setArtworkUri(track.artworkUri)
-                    .build()
-            )
-            .build()
+        val mediaItem = createMediaItemForTrack(track)
         
         mediaController?.addMediaItem(mediaItem)
     }
