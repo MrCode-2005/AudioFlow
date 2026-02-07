@@ -116,8 +116,8 @@ class SearchViewModel @Inject constructor(
             )
         }
         
-        // Debounce: 500ms for YouTube (slower API), 300ms for local
-        val debounceTime = if (_uiState.value.searchMode == SearchMode.YOUTUBE) 500L else 300L
+        // Debounce: 200ms for YouTube (reduced from 500ms), 150ms for local
+    val debounceTime = if (_uiState.value.searchMode == SearchMode.YOUTUBE) 200L else 150L
         searchJob = viewModelScope.launch {
             delay(debounceTime)
             performSearch(query)
@@ -288,6 +288,12 @@ class SearchViewModel @Inject constructor(
                     )
                     // Apply filter after setting results
                     applyContentFilter()
+                    
+                    // PREFETCH: Pre-extract first 2 results for instant playback
+                    if (results.isNotEmpty()) {
+                        playerController.setYouTubeQueue(results, -1) // Set queue without playing
+                        prefetchFirstSearchResults(results.take(2))
+                    }
                 }
                 .onFailure { error ->
                 val friendlyMessage = when {
@@ -471,5 +477,21 @@ class SearchViewModel @Inject constructor(
 
     fun clearAllRecentlyPlayed() {
         recentlyPlayedManager.clearAll()
+    }
+    
+    /**
+     * Prefetch stream URLs for first search results in background
+     * This enables instant playback when user clicks a top result
+     */
+    private fun prefetchFirstSearchResults(results: List<YouTubeSearchResult>) {
+        viewModelScope.launch {
+            results.forEach { result ->
+                // Fire and forget - extract in background
+                mediaRepository.getYouTubeStreamUrl(result.videoId)
+                    .onSuccess {
+                        android.util.Log.d("SearchViewModel", "Prefetched: ${result.title}")
+                    }
+            }
+        }
     }
 }
