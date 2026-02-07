@@ -174,8 +174,8 @@ fun CreateScreen(
         if (showCustomPlaylistDialog) {
             CustomPlaylistDialog(
                 onDismiss = { showCustomPlaylistDialog = false },
-                onConfirm = { artist, genre, customGenre, songCount ->
-                    viewModel.generateCustomPlaylist(artist, genre, customGenre, songCount)
+                onConfirm = { artist, genre, customGenre, songCount, includePlaylist ->
+                    viewModel.generateCustomPlaylist(artist, genre, customGenre, songCount, includePlaylist)
                     showCustomPlaylistDialog = false
                 }
             )
@@ -298,12 +298,13 @@ private fun CreatePlaylistDialog(
 @Composable
 private fun CustomPlaylistDialog(
     onDismiss: () -> Unit,
-    onConfirm: (artist: String, genre: String, customGenre: String, songCount: Int) -> Unit
+    onConfirm: (artist: String, genre: String, customGenre: String, songCount: Int, includePlaylist: Boolean) -> Unit
 ) {
     var artistName by remember { mutableStateOf("") }
     var selectedGenre by remember { mutableStateOf("") }
     var customGenre by remember { mutableStateOf("") }
-    var songCount by remember { mutableFloatStateOf(15f) }
+    var songCount by remember { mutableFloatStateOf(30f) }
+    var includePlaylist by remember { mutableStateOf(false) }
     
     val genres = listOf(
         "Love Songs",
@@ -401,7 +402,57 @@ private fun CustomPlaylistDialog(
                     }
                 }
                 
-                // Song Count Slider
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Include Playlist Checkbox
+                Text(
+                    text = "Content Filter",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary
+                )
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { includePlaylist = !includePlaylist }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = includePlaylist,
+                        onCheckedChange = { includePlaylist = it },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = SpotifyGreen,
+                            uncheckedColor = TextSecondary,
+                            checkmarkColor = SpotifyBlack
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Include Playlists/Mixes",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Include long videos with multiple songs",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+                
+                if (!includePlaylist) {
+                    Text(
+                        text = "✓ Only individual songs (under 10 min)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SpotifyGreen
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Song Count Slider - increased to 100
                 Text(
                     text = "Number of Songs: ${songCount.toInt()}",
                     style = MaterialTheme.typography.labelMedium,
@@ -410,8 +461,8 @@ private fun CustomPlaylistDialog(
                 Slider(
                     value = songCount,
                     onValueChange = { songCount = it },
-                    valueRange = 5f..30f,
-                    steps = 24,
+                    valueRange = 10f..100f,
+                    steps = 17, // 10, 15, 20, 25, ..., 100
                     colors = SliderDefaults.colors(
                         thumbColor = SpotifyGreen,
                         activeTrackColor = SpotifyGreen,
@@ -422,7 +473,7 @@ private fun CustomPlaylistDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(artistName, selectedGenre, customGenre, songCount.toInt()) },
+                onClick = { onConfirm(artistName, selectedGenre, customGenre, songCount.toInt(), includePlaylist) },
                 enabled = isValid
             ) {
                 Text("Generate", color = if (isValid) SpotifyGreen else TextSecondary)
