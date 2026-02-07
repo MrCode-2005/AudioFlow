@@ -59,34 +59,79 @@ fun HomeScreen(
             .fillMaxSize()
             .background(SpotifyBlack)
     ) {
-        if (uiState.isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center),
-                color = SpotifyGreen
-            )
-        } else if (uiState.allTracks.isEmpty() && uiState.trendingSongs.isEmpty()) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                HomeHeader(onNavigateToSettings = onNavigateToSettings)
-                Box(modifier = Modifier.weight(1f)) {
-                    EmptyStateContent(
-                        onRefresh = { viewModel.loadMusic() }
-                    )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = if (playbackState.currentTrack != null) 140.dp else 80.dp)
+        ) {
+            // Header with toggle
+            item {
+                HomeHeader(
+                    isDynamicMode = uiState.isDynamicMode,
+                    onToggleMode = { viewModel.toggleContentMode() },
+                    onNavigateToSettings = onNavigateToSettings
+                )
+            }
+            
+            // ==================== LOCAL MODE: Your Library Only ====================
+            if (!uiState.isDynamicMode) {
+                if (uiState.isLoading) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = SpotifyGreen)
+                        }
+                    }
+                } else if (uiState.allTracks.isEmpty()) {
+                    item {
+                        EmptyStateContent(
+                            onRefresh = { viewModel.loadMusic() }
+                        )
+                    }
+                } else {
+                    // Your Library Header with Play button
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Your Library",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            
+                            PlayButton(
+                                isPlaying = playbackState.isPlaying,
+                                onClick = { viewModel.playAllTracks() },
+                                size = ButtonSize.MEDIUM
+                            )
+                        }
+                    }
+                    
+                    // Local tracks list
+                    itemsIndexed(uiState.allTracks) { index, track ->
+                        TrackListItem(
+                            track = track,
+                            onClick = {
+                                viewModel.playAllTracks(index)
+                                onTrackClick(track)
+                            }
+                        )
+                    }
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = if (playbackState.currentTrack != null) 140.dp else 80.dp)
-            ) {
-                // Header with toggle
-                item {
-                    HomeHeader(
-                        onNavigateToSearch = onNavigateToSearch,
-                        onNavigateToSettings = onNavigateToSettings
-                    )
-                }
-                
-                // ==================== TRENDING SECTION ====================
+            
+            // ==================== DISCOVER MODE: Recommendations ====================
+            if (uiState.isDynamicMode) {
+                // Trending Now Section
                 if (uiState.trendingSongs.isNotEmpty() || uiState.isTrendingLoading) {
                     item {
                         SectionHeader(title = "🔥 Trending Now")
@@ -97,7 +142,7 @@ fun HomeScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(160.dp),
+                                    .height(180.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CircularProgressIndicator(color = SpotifyGreen)
@@ -123,10 +168,10 @@ fun HomeScreen(
                     item { Spacer(modifier = Modifier.height(24.dp)) }
                 }
                 
-                // ==================== AUTO PLAYLISTS ====================
+                // Made For You Section
                 if (uiState.trendingPlaylists.isNotEmpty()) {
                     item {
-                        SectionHeader(title = "📀 Made For You")
+                        SectionHeader(title = "🎯 Made For You")
                     }
                     
                     item {
@@ -149,7 +194,30 @@ fun HomeScreen(
                     item { Spacer(modifier = Modifier.height(24.dp)) }
                 }
                 
-                // ==================== GENRE CATEGORIES ====================
+                // Recently Played Section
+                if (recentlyPlayedSongs.isNotEmpty()) {
+                    item {
+                        SectionHeader(title = "🕐 Recently Played")
+                    }
+                    
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(recentlyPlayedSongs.take(10)) { song ->
+                                RecentSongCard(
+                                    song = song,
+                                    onClick = { /* TODO: Play this song */ }
+                                )
+                            }
+                        }
+                    }
+                    
+                    item { Spacer(modifier = Modifier.height(24.dp)) }
+                }
+                
+                // Browse by Genre Section
                 item {
                     SectionHeader(title = "🎵 Browse by Genre")
                 }
@@ -198,64 +266,6 @@ fun HomeScreen(
                 }
                 
                 item { Spacer(modifier = Modifier.height(24.dp)) }
-                
-                // ==================== RECENTLY PLAYED ====================
-                if (recentlyPlayedSongs.isNotEmpty()) {
-                    item {
-                        SectionHeader(title = "Recently Played")
-                    }
-                    
-                    item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(recentlyPlayedSongs.take(10)) { song ->
-                                RecentSongCard(
-                                    song = song,
-                                    onClick = { /* TODO: Play this song */ }
-                                )
-                            }
-                        }
-                    }
-                    
-                    item { Spacer(modifier = Modifier.height(16.dp)) }
-                }
-                
-                // ==================== LOCAL SONGS ====================
-                if (uiState.allTracks.isNotEmpty()) {
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Your Library",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = TextPrimary
-                            )
-                            
-                            PlayButton(
-                                isPlaying = playbackState.isPlaying,
-                                onClick = { viewModel.playAllTracks() },
-                                size = ButtonSize.MEDIUM
-                            )
-                        }
-                    }
-                    
-                    itemsIndexed(uiState.allTracks.take(20)) { index, track ->
-                        TrackListItem(
-                            track = track,
-                            onClick = {
-                                viewModel.playAllTracks(index)
-                                onTrackClick(track)
-                            }
-                        )
-                    }
-                }
             }
         }
         
@@ -273,6 +283,112 @@ fun HomeScreen(
                 onClick = onNavigateToPlayer,
                 modifier = Modifier.padding(bottom = 0.dp)
             )
+        }
+    }
+}
+
+// ==================== HEADER WITH STYLED TOGGLE ====================
+
+@Composable
+private fun HomeHeader(
+    isDynamicMode: Boolean = false,
+    onToggleMode: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {}
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Good evening",
+                style = MaterialTheme.typography.headlineLarge,
+                color = TextPrimary
+            )
+            
+            Row {
+                IconButton(onClick = { /* Notifications */ }) {
+                    Icon(
+                        imageVector = Icons.Default.Notifications,
+                        contentDescription = "Notifications",
+                        tint = TextPrimary
+                    )
+                }
+                
+                IconButton(onClick = { /* History */ }) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = "History",
+                        tint = TextPrimary
+                    )
+                }
+                
+                IconButton(onClick = onNavigateToSettings) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings",
+                        tint = TextPrimary
+                    )
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // STYLED LOCAL / DISCOVER TOGGLE (Equal width, better styling)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(SpotifySurfaceVariant)
+                .padding(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Local Button
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (!isDynamicMode) SpotifyGreen else Color.Transparent)
+                        .clickable { if (isDynamicMode) onToggleMode() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Local",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (!isDynamicMode) SpotifyBlack else TextSecondary
+                    )
+                }
+                
+                // Discover Button
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isDynamicMode) SpotifyGreen else Color.Transparent)
+                        .clickable { if (!isDynamicMode) onToggleMode() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Discover",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isDynamicMode) SpotifyBlack else TextSecondary
+                    )
+                }
+            }
         }
     }
 }
@@ -397,31 +513,39 @@ private fun GenreChip(
 ) {
     val isLoaded = category.songs.isNotEmpty()
     
-    FilterChip(
-        selected = isLoaded,
-        onClick = onClick,
-        label = { 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(category.emoji)
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(category.name)
-                if (category.isLoading) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(12.dp),
-                        strokeWidth = 2.dp,
-                        color = SpotifyGreen
-                    )
-                }
+    Surface(
+        modifier = Modifier
+            .height(40.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(20.dp),
+        color = if (isLoaded) SpotifyGreen else SpotifySurfaceVariant
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = category.emoji,
+                fontSize = 16.sp
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = category.name,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (isLoaded) SpotifyBlack else TextPrimary,
+                fontWeight = FontWeight.Medium
+            )
+            if (category.isLoading) {
+                Spacer(modifier = Modifier.width(8.dp))
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                    color = if (isLoaded) SpotifyBlack else SpotifyGreen
+                )
             }
-        },
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = SpotifyGreen,
-            selectedLabelColor = SpotifyBlack,
-            containerColor = SpotifySurfaceVariant,
-            labelColor = TextPrimary
-        )
-    )
+        }
+    }
 }
 
 @Composable
@@ -454,87 +578,6 @@ private fun GenreSongCard(
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center
         )
-    }
-}
-
-@Composable
-private fun HomeHeader(
-    onNavigateToSearch: () -> Unit = {},
-    onNavigateToSettings: () -> Unit = {}
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Good evening",
-                style = MaterialTheme.typography.headlineLarge,
-                color = TextPrimary
-            )
-            
-            Row {
-                IconButton(onClick = { /* Notifications */ }) {
-                    Icon(
-                        imageVector = Icons.Default.Notifications,
-                        contentDescription = "Notifications",
-                        tint = TextPrimary
-                    )
-                }
-                
-                IconButton(onClick = { /* History */ }) {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = "History",
-                        tint = TextPrimary
-                    )
-                }
-                
-                IconButton(onClick = onNavigateToSettings) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        tint = TextPrimary
-                    )
-                }
-            }
-        }
-        
-        // Local/Discover toggle
-        Row(
-            modifier = Modifier
-                .padding(top = 12.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(SpotifySurfaceVariant)
-                .padding(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            FilterChip(
-                selected = true,
-                onClick = { },
-                label = { Text("Local") },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = SpotifyGreen,
-                    selectedLabelColor = SpotifyBlack
-                ),
-                modifier = Modifier.weight(1f)
-            )
-            FilterChip(
-                selected = false,
-                onClick = { onNavigateToSearch() },
-                label = { Text("Discover") },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = SpotifyGreen,
-                    selectedLabelColor = SpotifyBlack
-                ),
-                modifier = Modifier.weight(1f)
-            )
-        }
     }
 }
 
@@ -584,7 +627,7 @@ private fun EmptyStateContent(
 ) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -599,7 +642,7 @@ private fun EmptyStateContent(
         Spacer(modifier = Modifier.height(16.dp))
         
         Text(
-            text = "No music found",
+            text = "No local music found",
             style = MaterialTheme.typography.headlineSmall,
             color = TextPrimary
         )
@@ -607,9 +650,10 @@ private fun EmptyStateContent(
         Spacer(modifier = Modifier.height(8.dp))
         
         Text(
-            text = "Add some music to your device to get started",
+            text = "Add music to your device or switch to Discover",
             style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary
+            color = TextSecondary,
+            textAlign = TextAlign.Center
         )
         
         Spacer(modifier = Modifier.height(24.dp))
