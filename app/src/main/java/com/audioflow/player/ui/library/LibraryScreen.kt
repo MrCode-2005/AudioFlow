@@ -37,10 +37,14 @@ import com.audioflow.player.ui.theme.*
 fun LibraryScreen(
     onNavigateToPlayer: () -> Unit,
     onNavigateToPlaylist: (String) -> Unit,
+    onNavigateToLikedSongs: () -> Unit,
+    onNavigateToDownloads: () -> Unit,
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
+    val likedSongs by viewModel.likedSongs.collectAsState(initial = emptyList())
+    val downloadedSongs by viewModel.downloadedSongs.collectAsState(initial = emptyList())
     
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     
@@ -91,7 +95,11 @@ fun LibraryScreen(
                 LibraryFilter.PLAYLISTS -> {
                     PlaylistsContent(
                         playlists = uiState.playlists,
+                        likedSongsCount = likedSongs.size,
+                        downloadedSongsCount = downloadedSongs.size,
                         onPlaylistClick = { onNavigateToPlaylist(it.id) },
+                        onLikedSongsClick = onNavigateToLikedSongs,
+                        onDownloadsClick = onNavigateToDownloads,
                         onCreatePlaylistClick = { showCreatePlaylistDialog = true },
                         onDeletePlaylistClick = { viewModel.deletePlaylist(it) },
                         modifier = Modifier.weight(1f)
@@ -382,7 +390,11 @@ private fun ArtistGridItem(
 @Composable
 private fun PlaylistsContent(
     playlists: List<Playlist>,
+    likedSongsCount: Int,
+    downloadedSongsCount: Int,
     onPlaylistClick: (Playlist) -> Unit,
+    onLikedSongsClick: () -> Unit,
+    onDownloadsClick: () -> Unit,
     onCreatePlaylistClick: () -> Unit,
     onDeletePlaylistClick: (Playlist) -> Unit,
     modifier: Modifier = Modifier
@@ -438,6 +450,26 @@ private fun PlaylistsContent(
             modifier = modifier,
             contentPadding = PaddingValues(bottom = 140.dp)
         ) {
+            // Special Items
+            item {
+                SpecialPlaylistItem(
+                    title = "Liked Songs",
+                    subtitle = "$likedSongsCount songs",
+                    icon = Icons.Default.Favorite,
+                    color = Color(0xFF450AF5),
+                    onClick = onLikedSongsClick
+                )
+            }
+            item {
+                SpecialPlaylistItem(
+                    title = "Downloads",
+                    subtitle = "$downloadedSongsCount songs",
+                    icon = Icons.Default.Download,
+                    color = Color(0xFF006450), // Teal-ish
+                    onClick = onDownloadsClick
+                )
+            }
+
             items(playlists) { playlist ->
                 PlaylistListItem(
                     playlist = playlist,
@@ -445,6 +477,57 @@ private fun PlaylistsContent(
                     onDeleteClick = { onDeletePlaylistClick(playlist) }
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SpecialPlaylistItem(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Icon
+        Surface(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(4.dp)),
+            color = color
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.padding(12.dp),
+                tint = Color.White
+            )
+        }
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
         }
     }
 }

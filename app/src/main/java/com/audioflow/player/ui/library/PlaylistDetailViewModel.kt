@@ -21,8 +21,11 @@ class PlaylistDetailViewModel @Inject constructor(
     private val playlistManager: PlaylistManager,
     private val mediaRepository: MediaRepository,
     private val playerController: PlayerController,
+    private val downloadRepository: com.audioflow.player.data.repository.DownloadRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+
+    val playbackState = playerController.playbackState
 
     private val playlistId: String = checkNotNull(savedStateHandle["playlistId"])
     
@@ -70,6 +73,23 @@ class PlaylistDetailViewModel @Inject constructor(
     fun playAll() {
         if (_tracks.value.isNotEmpty()) {
             playerController.playPlaylist(_tracks.value, 0)
+        }
+    }
+
+    fun shufflePlay() {
+        if (_tracks.value.isNotEmpty()) {
+            playerController.toggleShuffle()
+            // If not playing from this playlist, start playing
+            // Logic handled by playerController mostly, but if stopped, start random
+            playerController.playPlaylist(_tracks.value, (0 until _tracks.value.size).random())
+        }
+    }
+
+    fun downloadAll() {
+        viewModelScope.launch {
+            _tracks.value.forEach { track ->
+                downloadRepository.startDownload(track)
+            }
         }
     }
 }

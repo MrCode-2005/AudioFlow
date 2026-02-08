@@ -11,6 +11,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import androidx.room.Room
+import com.audioflow.player.data.local.AppDatabase
+import com.audioflow.player.data.local.dao.DownloadedSongDao
+import com.audioflow.player.data.local.dao.LikedSongDao
 import javax.inject.Singleton
 
 @Module
@@ -58,5 +62,28 @@ object AppModule {
         recentlyPlayedManager: com.audioflow.player.data.local.RecentlyPlayedManager
     ): PlayerController {
         return PlayerController(context, mediaRepository, recentlyPlayedManager)
+    }
+    @Provides
+    @Singleton
+    fun provideAppDatabase(
+        @ApplicationContext context: Context
+    ): AppDatabase {
+        return Room.databaseBuilder(
+            context,
+            AppDatabase::class.java,
+            "audioflow.db"
+        ).build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideLikedSongDao(database: AppDatabase): LikedSongDao {
+        return database.likedSongDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideDownloadedSongDao(database: AppDatabase): DownloadedSongDao {
+        return database.downloadedSongDao()
     }
 }

@@ -436,6 +436,28 @@ class PlayerController @Inject constructor(
         mediaController?.play()
     }
     
+    fun seekToQueueIndex(index: Int) {
+        Log.d(TAG, "seekToQueueIndex($index)")
+        if (playlistQueue.isNotEmpty()) {
+            if (index in playlistQueue.indices) {
+                playPlaylistQueueItem(index)
+            }
+        } else if (youTubeQueue.isNotEmpty()) {
+            if (index in youTubeQueue.indices) {
+                // Determine direction for optimization
+                if (index == youTubeQueueIndex + 1) {
+                    next() // Use optimized next() if applicable
+                } else if (index == youTubeQueueIndex - 1) {
+                    previous() // Use optimized previous() if applicable
+                } else {
+                    playYouTubeQueueItem(index)
+                }
+            }
+        } else {
+            mediaController?.seekToDefaultPosition(index)
+        }
+    }
+    
     /**
      * INSTANT NEXT: Uses pre-prepared MediaItems for zero-delay transitions
      */

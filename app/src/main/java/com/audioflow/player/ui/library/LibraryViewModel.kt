@@ -36,8 +36,13 @@ class LibraryViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val playerController: PlayerController,
     private val playlistManager: com.audioflow.player.data.local.PlaylistManager,
+    private val likedSongsManager: com.audioflow.player.data.local.LikedSongsManager,
+    private val downloadRepository: com.audioflow.player.data.repository.DownloadRepository,
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+    
+    val likedSongs = likedSongsManager.likedSongs
+    val downloadedSongs = downloadRepository.allDownloads
     
     private val _uiState = MutableStateFlow(LibraryUiState())
     val uiState: StateFlow<LibraryUiState> = _uiState.asStateFlow()

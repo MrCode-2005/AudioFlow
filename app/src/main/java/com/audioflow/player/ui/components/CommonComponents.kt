@@ -121,6 +121,7 @@ fun TrackListItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     showAlbumArt: Boolean = true,
+    isPlaying: Boolean = false,
     onDeleteClick: ((com.audioflow.player.model.Track) -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null
 ) {
@@ -152,7 +153,7 @@ fun TrackListItem(
             Text(
                 text = track.title,
                 style = MaterialTheme.typography.titleSmall,
-                color = TextPrimary,
+                color = if (isPlaying) SpotifyGreen else TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

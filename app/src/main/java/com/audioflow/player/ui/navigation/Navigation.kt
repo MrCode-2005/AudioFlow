@@ -86,6 +86,20 @@ sealed class Screen(
         selectedIcon = Icons.Filled.PlaylistPlay,
         unselectedIcon = Icons.Outlined.PlaylistPlay
     )
+
+    data object LikedSongs : Screen(
+        route = "liked_songs",
+        title = "Liked Songs",
+        selectedIcon = Icons.Filled.Favorite,
+        unselectedIcon = Icons.Outlined.FavoriteBorder
+    )
+
+    data object Downloads : Screen(
+        route = "downloads",
+        title = "Downloads",
+        selectedIcon = Icons.Filled.Download,
+        unselectedIcon = Icons.Outlined.Download
+    )
 }
 
 @Composable
@@ -199,6 +213,34 @@ fun AudioFlowNavigation() {
                     },
                     onNavigateToPlaylist = { playlistId ->
                         navController.navigate(Screen.PlaylistDetail.route.replace("{playlistId}", playlistId))
+                    },
+                    onNavigateToLikedSongs = {
+                        navController.navigate(Screen.LikedSongs.route)
+                    },
+                    onNavigateToDownloads = {
+                        navController.navigate(Screen.Downloads.route)
+                    }
+                )
+            }
+            
+            composable(Screen.LikedSongs.route) {
+                com.audioflow.player.ui.library.LikedSongsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToPlayer = {
+                        navController.navigate(Screen.NowPlaying.route) {
+                            launchSingleTop = true
+                        }
+                    }
+                )
+            }
+            
+            composable(Screen.Downloads.route) {
+                com.audioflow.player.ui.library.DownloadsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToPlayer = {
+                        navController.navigate(Screen.NowPlaying.route) {
+                            launchSingleTop = true
+                        }
                     }
                 )
             }

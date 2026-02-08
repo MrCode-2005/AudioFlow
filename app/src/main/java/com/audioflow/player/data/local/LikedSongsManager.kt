@@ -1,82 +1,84 @@
 package com.audioflow.player.data.local
 
-import android.content.Context
-import android.content.SharedPreferences
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.MutableStateFlow
+import com.audioflow.player.data.local.dao.LikedSongDao
+import com.audioflow.player.data.local.entity.LikedSongEntity
+import com.audioflow.player.model.Track
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Manages liked songs using SharedPreferences
+ * Manages liked songs using Room Database
  */
 @Singleton
 class LikedSongsManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    private val likedSongDao: LikedSongDao
 ) {
-    companion object {
-        private const val PREFS_NAME = "liked_songs"
-        private const val KEY_LIKED_IDS = "liked_ids"
-        private const val SEPARATOR = "|||"
-    }
-    
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    
-    private val _likedSongIds = MutableStateFlow<Set<String>>(loadLikedSongs())
-    val likedSongIds: StateFlow<Set<String>> = _likedSongIds.asStateFlow()
-    
-    private fun loadLikedSongs(): Set<String> {
-        val idsString = prefs.getString(KEY_LIKED_IDS, "") ?: ""
-        return if (idsString.isEmpty()) {
-            emptySet()
-        } else {
-            idsString.split(SEPARATOR).filter { it.isNotBlank() }.toSet()
-        }
-    }
-    
-    private fun saveLikedSongs(ids: Set<String>) {
-        prefs.edit().putString(KEY_LIKED_IDS, ids.joinToString(SEPARATOR)).apply()
-        _likedSongIds.value = ids
-    }
+    private val scope = CoroutineScope(Dispatchers.IO) // Use IO dispatcher for DB ops
+
+    // Expose full list of liked songs
+    val likedSongs: Flow<List<LikedSongEntity>> = likedSongDao.getAllLikedSongs()
+
+    // Expose set of IDs for quick lookup (optimized)
+    val likedSongIds: StateFlow<Set<String>> = likedSongDao.getAllLikedSongs()
+        .map { list -> list.map { it.id }.toSet() }
+        .stateIn(
+            scope = scope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptySet()
+        )
     
     /**
-     * Check if a song is liked
+     * Check if a song is liked (Synchronous check against cached StateFlow)
      */
     fun isLiked(trackId: String): Boolean {
-        return _likedSongIds.value.contains(trackId)
+        return likedSongIds.value.contains(trackId)
     }
     
     /**
      * Add a song to liked songs
      */
-    fun likeSong(trackId: String) {
-        val current = _likedSongIds.value.toMutableSet()
-        current.add(trackId)
-        saveLikedSongs(current)
+    fun likeSong(track: Track) {
+        scope.launch {
+            val entity = LikedSongEntity(
+                id = track.id,
+                title = track.title,
+                artist = track.artist,
+                album = track.album,
+                thumbnailUrl = track.artworkUri.toString(),
+                duration = track.duration
+            )
+            likedSongDao.insert(entity)
+        }
     }
     
     /**
      * Remove a song from liked songs
      */
     fun unlikeSong(trackId: String) {
-        val current = _likedSongIds.value.toMutableSet()
-        current.remove(trackId)
-        saveLikedSongs(current)
+        scope.launch {
+            likedSongDao.delete(trackId)
+        }
     }
     
     /**
      * Toggle like status for a song
-     * @return true if now liked, false if now unliked
      */
-    fun toggleLike(trackId: String): Boolean {
-        return if (isLiked(trackId)) {
-            unlikeSong(trackId)
-            false
+    fun toggleLike(track: Track) {
+        if (isLiked(track.id)) {
+            unlikeSong(track.id)
         } else {
-            likeSong(trackId)
-            true
+            likeSong(track)
         }
     }
 }
+
+
+

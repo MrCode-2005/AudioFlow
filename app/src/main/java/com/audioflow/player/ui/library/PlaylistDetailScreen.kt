@@ -13,6 +13,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.DownloadForOffline
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,6 +43,10 @@ fun PlaylistDetailScreen(
 ) {
     val playlist by viewModel.playlist.collectAsState()
     val tracks by viewModel.tracks.collectAsState()
+    val playbackState by viewModel.playbackState.collectAsState()
+    
+    // Download state for playlist (simplified for now)
+    var isDownloaded by remember { mutableStateOf(false) }
     
     // Gradient based on artwork (placeholder logic, using green/grey)
     val gradientColors = listOf(
@@ -126,22 +135,87 @@ fun PlaylistDetailScreen(
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    // Play Button
-                    Button(
-                        onClick = { viewModel.playAll() },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = SpotifyGreen,
-                            contentColor = SpotifyBlack
-                        ),
-                        shape = CircleShape,
-                        modifier = Modifier.size(56.dp),
-                        contentPadding = PaddingValues(0.dp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Action Buttons Row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Play",
-                            modifier = Modifier.size(32.dp)
-                        )
+                        // Shuffle Button
+                        IconButton(onClick = { viewModel.shufflePlay() }) {
+                            Icon(
+                                imageVector = Icons.Default.Shuffle,
+                                contentDescription = "Shuffle",
+                                tint = if (playbackState.shuffleModeEnabled) SpotifyGreen else TextSecondary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    
+                        // Play Button
+                        Button(
+                            onClick = { viewModel.playAll() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SpotifyGreen,
+                                contentColor = SpotifyBlack
+                            ),
+                            shape = CircleShape,
+                            modifier = Modifier.size(56.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (playbackState.isPlaying && tracks.any { it.id == playbackState.currentTrack?.id }) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Play",
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                        
+                        // Download Button
+                        IconButton(onClick = { 
+                            viewModel.downloadAll()
+                            // Show toast/snackbar
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.DownloadForOffline,
+                                contentDescription = "Download Playlist",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+
+                        // More / Edit Button
+                        Box {
+                            var showMenu by remember { mutableStateOf(false) }
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "More",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Add Songs") },
+                                    onClick = { showMenu = false /* TODO */ },
+                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Edit Playlist") },
+                                    onClick = { showMenu = false /* TODO */ },
+                                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
+                                )
+                                Divider()
+                                DropdownMenuItem(
+                                    text = { Text("Delete Playlist", color = Color.Red) },
+                                    onClick = { showMenu = false /* TODO */ },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red) }
+                                )
+                            }
+                        }
                     }
                     
                     Spacer(modifier = Modifier.height(16.dp))
@@ -164,6 +238,7 @@ fun PlaylistDetailScreen(
                     items(tracks) { track ->
                         TrackListItem(
                             track = track,
+                            isPlaying = playbackState.currentTrack?.id == track.id,
                             onClick = { 
                                 viewModel.playTrack(track)
                                 onNavigateToPlayer()

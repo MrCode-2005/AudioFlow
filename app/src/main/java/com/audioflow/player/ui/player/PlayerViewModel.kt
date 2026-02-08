@@ -28,7 +28,8 @@ class PlayerViewModel @Inject constructor(
     private val playerController: PlayerController,
     private val likedSongsManager: LikedSongsManager,
     private val playlistManager: PlaylistManager,
-    private val lyricsProvider: LyricsProvider
+    private val lyricsProvider: LyricsProvider,
+    private val downloadRepository: com.audioflow.player.data.repository.DownloadRepository
 ) : ViewModel() {
     
     val playbackState = playerController.playbackState
@@ -49,6 +50,13 @@ class PlayerViewModel @Inject constructor(
     
     private var lastFetchedTrackId: String? = null
     
+    // Download status for current track
+    private val _downloadStatus = MutableStateFlow(com.audioflow.player.data.local.entity.DownloadStatus.FAILED) // Default to failed/not downloaded
+    val downloadStatus: StateFlow<com.audioflow.player.data.local.entity.DownloadStatus> = _downloadStatus.asStateFlow()
+    
+    private val _isDownloaded = MutableStateFlow(false)
+    val isDownloaded: StateFlow<Boolean> = _isDownloaded.asStateFlow()
+    
     // Options sheet state
     private val _showOptionsSheet = MutableStateFlow(false)
     val showOptionsSheet: StateFlow<Boolean> = _showOptionsSheet.asStateFlow()
@@ -62,11 +70,38 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             playbackState.collect { state ->
                 val track = state.currentTrack
-                if (track != null && track.id != lastFetchedTrackId) {
-                    lastFetchedTrackId = track.id
-                    fetchLyrics(track.title, track.artist ?: "Unknown", track.duration)
+                if (track != null) {
+                    if (track.id != lastFetchedTrackId) {
+                        lastFetchedTrackId = track.id
+                        fetchLyrics(track.title, track.artist ?: "Unknown", track.duration)
+                    }
+                    // Check download status
+                    checkDownloadStatus(track.id)
                 }
             }
+        }
+    }
+    
+    private fun checkDownloadStatus(trackId: String) {
+        viewModelScope.launch {
+            downloadRepository.getDownloadStatus(trackId).collect { status ->
+                _downloadStatus.value = status
+                _isDownloaded.value = status == com.audioflow.player.data.local.entity.DownloadStatus.COMPLETED
+            }
+        }
+    }
+
+    fun downloadCurrentTrack() {
+        val track = playbackState.value.currentTrack ?: return
+        viewModelScope.launch {
+            downloadRepository.startDownload(track)
+        }
+    }
+    
+    fun deleteDownload() {
+        val track = playbackState.value.currentTrack ?: return
+        viewModelScope.launch {
+            downloadRepository.deleteDownload(track.id)
         }
     }
 
@@ -79,9 +114,6 @@ class PlayerViewModel @Inject constructor(
             lyricsProvider.getLyrics(title, artist, duration)
                 .onSuccess { result ->
                     _lyrics.value = result
-                }
-                .onFailure {
-                    _lyrics.value = null
                 }
             
             _isLoadingLyrics.value = false
@@ -103,11 +135,11 @@ class PlayerViewModel @Inject constructor(
      * Click 3+: Sheet actions handle the rest
      */
     fun onLikeButtonClick() {
-        val trackId = playbackState.value.currentTrack?.id ?: return
+        val track = playbackState.value.currentTrack ?: return
         
-        if (!likedSongsManager.isLiked(trackId)) {
+        if (!likedSongsManager.isLiked(track.id)) {
             // First click: Add to liked songs
-            likedSongsManager.likeSong(trackId)
+            likedSongsManager.likeSong(track)
         } else {
             // Second click: Show bottom sheet
             _showPlaylistSheet.value = true
@@ -142,6 +174,10 @@ class PlayerViewModel @Inject constructor(
     
     fun seekToProgress(progress: Float) {
         playerController.seekToProgress(progress)
+    }
+    
+    fun seekToQueueIndex(index: Int) {
+        playerController.seekToQueueIndex(index)
     }
     
     fun toggleShuffle() {
