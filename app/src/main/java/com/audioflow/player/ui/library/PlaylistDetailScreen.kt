@@ -147,7 +147,7 @@ fun PlaylistDetailScreen(
                             Icon(
                                 imageVector = Icons.Default.Shuffle,
                                 contentDescription = "Shuffle",
-                                tint = if (playbackState.shuffleModeEnabled) SpotifyGreen else TextSecondary,
+                                tint = if (playbackState.shuffleEnabled) SpotifyGreen else TextSecondary,
                                 modifier = Modifier.size(28.dp)
                             )
                         }

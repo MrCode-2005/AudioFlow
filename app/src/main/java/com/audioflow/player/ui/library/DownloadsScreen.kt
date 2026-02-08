@@ -99,12 +99,12 @@ fun DownloadsScreen(
                     val track = Track(
                         id = entity.id,
                         title = entity.title,
-                        artist = entity.artist,
-                        album = entity.album,
+                        artist = entity.artist ?: "Unknown",
+                        album = entity.album ?: "Unknown",
                         artworkUri = android.net.Uri.parse(entity.thumbnailUrl ?: ""),
                         duration = entity.duration,
                         source = com.audioflow.player.model.TrackSource.LOCAL,
-                        contentUri = android.net.Uri.parse(entity.localPath) // Use local path!
+                        contentUri = android.net.Uri.parse(entity.localPath)
                     )
                     
                     TrackListItem(
