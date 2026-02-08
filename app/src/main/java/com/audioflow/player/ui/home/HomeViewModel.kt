@@ -38,7 +38,7 @@ data class TrendingPlaylist(
     val name: String,
     val description: String,
     val songs: List<YouTubeSearchResult> = emptyList(),
-    val coverEmoji: String = "🎵"
+    val coverImageUrl: String = "" // Uses first song's thumbnail
 )
 
 data class HomeUiState(
@@ -134,7 +134,7 @@ class HomeViewModel @Inject constructor(
     }
     
     private suspend fun loadTrendingSongs() {
-        mediaRepository.searchYouTube("trending music 2024 hits")
+        mediaRepository.searchYouTube("trending songs 2024 -mix -compilation -hour")
             .onSuccess { results ->
                 _uiState.value = _uiState.value.copy(
                     trendingSongs = results.take(10),
@@ -200,34 +200,28 @@ class HomeViewModel @Inject constructor(
         val deferredResults = playlistConfigs.map { (id, name, desc) ->
             viewModelScope.async {
                 val query = when (id) {
-                    "today_hits" -> "top hits 2024 popular songs"
-                    "chill_vibes" -> "chill lofi relaxing music"
-                    "workout" -> "workout gym motivation music"
-                    "party" -> "party dance music 2024"
-                    else -> "popular music 2024"
-                }
-                
-                val emoji = when (id) {
-                    "today_hits" -> "🔥"
-                    "chill_vibes" -> "😌"
-                    "workout" -> "💪"
-                    "party" -> "🎉"
-                    else -> "🎵"
+                    "today_hits" -> "top hits 2024 popular songs -mix -compilation -hour"
+                    "chill_vibes" -> "chill lofi relaxing music -mix -compilation -hour"
+                    "workout" -> "workout gym motivation music -mix -compilation -hour"
+                    "party" -> "party dance music 2024 -mix -compilation -hour"
+                    else -> "popular music 2024 -mix -compilation"
                 }
                 
                 mediaRepository.searchYouTube(query)
                     .fold(
                         onSuccess = { results ->
+                            // Use first song's thumbnail as playlist cover
+                            val coverUrl = results.firstOrNull()?.thumbnailUrl ?: ""
                             TrendingPlaylist(
                                 id = id,
                                 name = name,
                                 description = desc,
                                 songs = results.take(15),
-                                coverEmoji = emoji
+                                coverImageUrl = coverUrl
                             )
                         },
                         onFailure = {
-                            TrendingPlaylist(id = id, name = name, description = desc, coverEmoji = emoji)
+                            TrendingPlaylist(id = id, name = name, description = desc)
                         }
                     )
             }

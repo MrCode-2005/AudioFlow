@@ -469,22 +469,36 @@ private fun AutoPlaylistCard(
             modifier = Modifier.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Emoji cover
-            Box(
-                modifier = Modifier
-                    .size(80.dp)
-                    .background(
-                        brush = Brush.linearGradient(
-                            colors = listOf(SpotifyGreen.copy(alpha = 0.8f), SpotifyGreen.copy(alpha = 0.3f))
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = playlist.coverEmoji,
-                    fontSize = 36.sp
+            // Playlist cover image
+            if (playlist.coverImageUrl.isNotEmpty()) {
+                AsyncImage(
+                    model = playlist.coverImageUrl,
+                    contentDescription = playlist.name,
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Crop
                 )
+            } else {
+                // Fallback gradient placeholder
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .background(
+                            brush = Brush.linearGradient(
+                                colors = listOf(SpotifyGreen.copy(alpha = 0.8f), SpotifyGreen.copy(alpha = 0.3f))
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MusicNote,
+                        contentDescription = null,
+                        tint = TextPrimary,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(12.dp))
