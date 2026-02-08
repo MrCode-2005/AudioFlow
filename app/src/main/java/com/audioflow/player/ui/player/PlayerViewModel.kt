@@ -28,8 +28,7 @@ class PlayerViewModel @Inject constructor(
     private val playerController: PlayerController,
     private val likedSongsManager: LikedSongsManager,
     private val playlistManager: PlaylistManager,
-    private val lyricsProvider: LyricsProvider,
-    private val youTubeExtractor: com.audioflow.player.data.remote.YouTubeExtractor
+    private val lyricsProvider: LyricsProvider
 ) : ViewModel() {
     
     val playbackState = playerController.playbackState
@@ -48,13 +47,6 @@ class PlayerViewModel @Inject constructor(
     private val _isLoadingLyrics = MutableStateFlow(false)
     val isLoadingLyrics: StateFlow<Boolean> = _isLoadingLyrics.asStateFlow()
     
-    // Video background state
-    private val _videoStreamUrl = MutableStateFlow<String?>(null)
-    val videoStreamUrl: StateFlow<String?> = _videoStreamUrl.asStateFlow()
-    
-    private val _isLoadingVideo = MutableStateFlow(false)
-    val isLoadingVideo: StateFlow<Boolean> = _isLoadingVideo.asStateFlow()
-    
     private var lastFetchedTrackId: String? = null
     
     // Options sheet state
@@ -66,37 +58,15 @@ class PlayerViewModel @Inject constructor(
     val lyricsEnabled: StateFlow<Boolean> = _lyricsEnabled.asStateFlow()
     
     init {
-        // Auto-fetch lyrics and video when track changes
+        // Auto-fetch lyrics when track changes
         viewModelScope.launch {
             playbackState.collect { state ->
                 val track = state.currentTrack
                 if (track != null && track.id != lastFetchedTrackId) {
                     lastFetchedTrackId = track.id
                     fetchLyrics(track.title, track.artist ?: "Unknown", track.duration)
-                    
-                    // Check if this is a YouTube track and fetch video
-                    if (track.id.startsWith("yt:") || track.id.length == 11) {
-                        val videoId = track.id.removePrefix("yt:")
-                        fetchVideoStream(videoId)
-                    } else {
-                        _videoStreamUrl.value = null
-                    }
                 }
             }
-        }
-    }
-    
-    private fun fetchVideoStream(videoId: String) {
-        viewModelScope.launch {
-            _isLoadingVideo.value = true
-            youTubeExtractor.extractVideoStream(videoId)
-                .onSuccess { info ->
-                    _videoStreamUrl.value = info.videoStreamUrl
-                }
-                .onFailure {
-                    _videoStreamUrl.value = null
-                }
-            _isLoadingVideo.value = false
         }
     }
 
