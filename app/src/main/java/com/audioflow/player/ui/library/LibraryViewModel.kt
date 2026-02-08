@@ -165,4 +165,30 @@ class LibraryViewModel @Inject constructor(
             playlistManager.removeFromPlaylist(playlist.id, track.id)
         }
     }
+    
+    // Rename a playlist
+    fun renamePlaylist(playlist: Playlist, newName: String) {
+        viewModelScope.launch {
+            playlistManager.renamePlaylist(playlist.id, newName)
+        }
+    }
+    
+    // Move playlist up in the list
+    fun movePlaylistUp(playlist: Playlist) {
+        val currentList = _uiState.value.playlists
+        val index = currentList.indexOfFirst { it.id == playlist.id }
+        if (index > 0) {
+            // Swap in the underlying manager - we need to update order
+            playlistManager.reorderPlaylists(index, index - 1)
+        }
+    }
+    
+    // Move playlist down in the list
+    fun movePlaylistDown(playlist: Playlist) {
+        val currentList = _uiState.value.playlists
+        val index = currentList.indexOfFirst { it.id == playlist.id }
+        if (index >= 0 && index < currentList.size - 1) {
+            playlistManager.reorderPlaylists(index, index + 1)
+        }
+    }
 }

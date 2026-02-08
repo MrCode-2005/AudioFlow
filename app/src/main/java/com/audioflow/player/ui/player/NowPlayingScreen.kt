@@ -49,12 +49,14 @@ import androidx.compose.foundation.pager.rememberPagerState
 fun NowPlayingScreen(
     onNavigateBack: () -> Unit,
     onNavigateToLyrics: (() -> Unit)? = null,
+    onNavigateToSearch: ((String) -> Unit)? = null,
     viewModel: PlayerViewModel = hiltViewModel()
 ) {
     val playbackState by viewModel.playbackState.collectAsState()
     val likedSongIds by viewModel.likedSongIds.collectAsState()
     val showPlaylistSheet by viewModel.showPlaylistSheet.collectAsState()
     val showNewPlaylistDialog by viewModel.showNewPlaylistDialog.collectAsState()
+    val showNewFolderDialog by viewModel.showNewFolderDialog.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val lyrics by viewModel.lyrics.collectAsState()
     val showOptionsSheet by viewModel.showOptionsSheet.collectAsState()
@@ -67,6 +69,16 @@ fun NowPlayingScreen(
     var sliderPosition by remember { mutableStateOf<Float?>(null) }
     var showLyricsScreen by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
+    
+    // Observe navigation events for Go to Artist/Album
+    val navigateToSearch by viewModel.navigateToSearch.collectAsState()
+    
+    LaunchedEffect(navigateToSearch) {
+        navigateToSearch?.let { query ->
+            onNavigateToSearch?.invoke(query)
+            viewModel.clearNavigateToSearch()
+        }
+    }
     
     // Swipe gesture state for debouncing
     var isSwipeProcessing by remember { mutableStateOf(false) }
@@ -163,7 +175,7 @@ fun NowPlayingScreen(
                 }
             }
             
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(8.dp)) // Reduced to give more space to album art
             
             // Get previous and next track artwork
             val queue = playbackState.queue
@@ -248,9 +260,9 @@ fun NowPlayingScreen(
                     androidx.compose.foundation.pager.HorizontalPager(
                         state = pagerState,
                         modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 32.dp), // Check this value for "thin strip" look
-                        pageSpacing = 16.dp,
-                        beyondBoundsPageCount = 3 // Preload 3 items each side
+                        contentPadding = PaddingValues(horizontal = 40.dp), // Show thin strips on sides
+                        pageSpacing = 12.dp, // Tighter spacing for thin strip effect
+                        beyondBoundsPageCount = 5 // Preload 5 items each side for smooth swiping
                     ) { page ->
                         val track = queue.getOrNull(page)
                         
@@ -287,7 +299,7 @@ fun NowPlayingScreen(
                 }
             }
             
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(16.dp)) // Reduced for tighter layout
             
             // Track info section (below album art)
             Column(
@@ -363,7 +375,7 @@ fun NowPlayingScreen(
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(12.dp)) // Tighter spacing
                 
                 // Progress bar
                 Column {
@@ -399,7 +411,7 @@ fun NowPlayingScreen(
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp)) // Tighter
                 
                 // Playback controls
                 Row(
@@ -472,7 +484,7 @@ fun NowPlayingScreen(
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp)) // Tighter
                 
                 // Bottom row: device, share, queue
                 Row(
@@ -632,6 +644,38 @@ fun NowPlayingScreen(
                 },
                 dismissButton = {
                     TextButton(onClick = { viewModel.hideCreatePlaylistDialog() }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+        
+        // Dialog for creating new folder
+        if (showNewFolderDialog) {
+            var newFolderName by remember { mutableStateOf("") }
+            AlertDialog(
+                onDismissRequest = { viewModel.hideNewFolderDialog() },
+                title = { Text("New Folder") },
+                text = {
+                    TextField(
+                        value = newFolderName,
+                        onValueChange = { newFolderName = it },
+                        placeholder = { Text("Folder name") },
+                        singleLine = true
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.confirmNewFolder(newFolderName)
+                            newFolderName = ""
+                        }
+                    ) {
+                        Text("Create")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.hideNewFolderDialog() }) {
                         Text("Cancel")
                     }
                 }

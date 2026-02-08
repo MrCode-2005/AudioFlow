@@ -747,8 +747,8 @@ class PlayerController @Inject constructor(
             }
         }
         
-        // Prefetch previous 3 items for smooth backward navigation
-        for (i in 1..3) {
+        // Prefetch previous 5 items for smooth backward navigation
+        for (i in 1..5) {
             val prevIndex = currentIndex - i
             if (prevIndex >= 0) {
                 prefetchYouTubeItemAt(prevIndex)

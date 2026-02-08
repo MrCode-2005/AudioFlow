@@ -103,6 +103,9 @@ fun LibraryScreen(
                         onDownloadsClick = onNavigateToDownloads,
                         onCreatePlaylistClick = { showCreatePlaylistDialog = true },
                         onDeletePlaylistClick = { viewModel.deletePlaylist(it) },
+                        onRenamePlaylistClick = { playlist, newName -> viewModel.renamePlaylist(playlist, newName) },
+                        onMovePlaylistUp = { viewModel.movePlaylistUp(it) },
+                        onMovePlaylistDown = { viewModel.movePlaylistDown(it) },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -398,6 +401,9 @@ private fun PlaylistsContent(
     onDownloadsClick: () -> Unit,
     onCreatePlaylistClick: () -> Unit,
     onDeletePlaylistClick: (Playlist) -> Unit,
+    onRenamePlaylistClick: (Playlist, String) -> Unit,
+    onMovePlaylistUp: (Playlist) -> Unit,
+    onMovePlaylistDown: (Playlist) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (playlists.isEmpty()) {
@@ -475,7 +481,10 @@ private fun PlaylistsContent(
                 PlaylistListItem(
                     playlist = playlist,
                     onClick = { onPlaylistClick(playlist) },
-                    onDeleteClick = { onDeletePlaylistClick(playlist) }
+                    onDeleteClick = { onDeletePlaylistClick(playlist) },
+                    onRenameClick = { newName -> onRenamePlaylistClick(playlist, newName) },
+                    onMoveUpClick = { onMovePlaylistUp(playlist) },
+                    onMoveDownClick = { onMovePlaylistDown(playlist) }
                 )
             }
         }
@@ -537,9 +546,14 @@ private fun SpecialPlaylistItem(
 private fun PlaylistListItem(
     playlist: Playlist,
     onClick: () -> Unit,
-    onDeleteClick: () -> Unit
+    onDeleteClick: () -> Unit,
+    onRenameClick: (String) -> Unit,
+    onMoveUpClick: () -> Unit,
+    onMoveDownClick: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf(playlist.name) }
     
     Row(
         modifier = Modifier
@@ -596,6 +610,37 @@ private fun PlaylistListItem(
                 onDismissRequest = { showMenu = false }
             ) {
                 DropdownMenuItem(
+                    text = { Text("Rename") },
+                    onClick = {
+                        showMenu = false
+                        newName = playlist.name
+                        showRenameDialog = true
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.Edit, contentDescription = null)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Move up") },
+                    onClick = {
+                        showMenu = false
+                        onMoveUpClick()
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.ArrowUpward, contentDescription = null)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Move down") },
+                    onClick = {
+                        showMenu = false
+                        onMoveDownClick()
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.ArrowDownward, contentDescription = null)
+                    }
+                )
+                DropdownMenuItem(
                     text = { Text("Delete playlist") },
                     onClick = {
                         showMenu = false
@@ -607,6 +652,39 @@ private fun PlaylistListItem(
                 )
             }
         }
+    }
+    
+    // Rename Dialog
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Rename Playlist") },
+            text = {
+                TextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    placeholder = { Text("Playlist name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newName.isNotBlank()) {
+                            onRenameClick(newName)
+                        }
+                        showRenameDialog = false
+                    }
+                ) {
+                    Text("Rename")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

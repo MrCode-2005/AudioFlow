@@ -92,4 +92,50 @@ class PlaylistDetailViewModel @Inject constructor(
             }
         }
     }
+    
+    // Move a track up in the playlist
+    fun moveTrackUp(track: Track) {
+        val currentTracks = _tracks.value
+        val index = currentTracks.indexOfFirst { it.id == track.id }
+        if (index > 0) {
+            playlistManager.reorderTrackInPlaylist(playlistId, index, index - 1)
+            loadPlaylist()
+        }
+    }
+    
+    // Move a track down in the playlist
+    fun moveTrackDown(track: Track) {
+        val currentTracks = _tracks.value
+        val index = currentTracks.indexOfFirst { it.id == track.id }
+        if (index >= 0 && index < currentTracks.size - 1) {
+            playlistManager.reorderTrackInPlaylist(playlistId, index, index + 1)
+            loadPlaylist()
+        }
+    }
+    
+    // Download a single track
+    fun downloadTrack(track: Track) {
+        viewModelScope.launch {
+            downloadRepository.startDownload(track)
+        }
+    }
+    
+    // Rename the current playlist
+    fun renamePlaylist(newName: String) {
+        if (newName.isNotBlank()) {
+            playlistManager.renamePlaylist(playlistId, newName)
+            loadPlaylist()
+        }
+    }
+    
+    // Delete the current playlist
+    fun deletePlaylist() {
+        playlistManager.deletePlaylist(playlistId)
+    }
+    
+    // Add a track to this playlist
+    fun addTrack(track: Track) {
+        playlistManager.addToPlaylist(playlistId, track.id)
+        loadPlaylist()
+    }
 }

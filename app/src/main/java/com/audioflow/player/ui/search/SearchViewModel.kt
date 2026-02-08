@@ -280,19 +280,11 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isYouTubeLoading = true)
             
-            // Add "song" or "official audio" to help find music, not vlogs
-            val enhancedQuery = if (query.contains("song", ignoreCase = true) || 
-                                    query.contains("music", ignoreCase = true) ||
-                                    query.contains("audio", ignoreCase = true) ||
-                                    query.contains("official", ignoreCase = true)) {
-                query
-            } else {
-                "$query song official audio"
-            }
+            // Use natural query without modifications to match YouTube's native behavior
+            // Adding extra keywords like "song official audio" can confuse results
+            Log.d(TAG, "Searching YouTube with query: $query")
             
-            Log.d(TAG, "Searching YouTube with enhanced query: $enhancedQuery")
-            
-            mediaRepository.searchYouTube(enhancedQuery)
+            mediaRepository.searchYouTube(query)
                 .onSuccess { results ->
                     // Save to search history on successful search
                     searchHistoryManager.addSearch(query)
@@ -355,7 +347,9 @@ class SearchViewModel @Inject constructor(
             "interview", "behind the scenes", "making of", "documentary",
             "podcast", "vlog", "reaction", "tutorial", "lesson", "how to",
             "unboxing", "review", "trailer", "movie clip", "gameplay",
-            "live stream", "q&a", "talk show", "news", "compilation funny"
+            "live stream", "livestream", "streaming", "q&a", "talk show", "news", 
+            "compilation funny", "full movie", "movie scene", "episode", "ep.",
+            "series", "season", "chapter", "audiobook", "asmr"
         )
         
         // Positive signals - these indicate actual music
@@ -378,9 +372,9 @@ class SearchViewModel @Inject constructor(
                 return@filter false
             }
             
-            // Duration filter - very long videos (> 20 min) are likely not songs
-            if (result.duration > 20 * 60 * 1000L) {
-                Log.d(TAG, "Filtering out (too long): ${result.title}")
+            // Duration filter - videos > 15 min are likely not songs (use 15 min per requirements)
+            if (result.duration > 15 * 60 * 1000L) {
+                Log.d(TAG, "Filtering out (too long > 15min): ${result.title}")
                 return@filter false
             }
             

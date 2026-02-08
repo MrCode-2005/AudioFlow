@@ -39,6 +39,9 @@ class PlayerViewModel @Inject constructor(
     private val _showNewPlaylistDialog = MutableStateFlow(false)
     val showNewPlaylistDialog: StateFlow<Boolean> = _showNewPlaylistDialog.asStateFlow()
     
+    private val _showNewFolderDialog = MutableStateFlow(false)
+    val showNewFolderDialog: StateFlow<Boolean> = _showNewFolderDialog.asStateFlow()
+    
     private val _showPlaylistSheet = MutableStateFlow(false)
     val showPlaylistSheet: StateFlow<Boolean> = _showPlaylistSheet.asStateFlow()
     
@@ -64,6 +67,14 @@ class PlayerViewModel @Inject constructor(
     // Lyrics visibility preference (default: on)
     private val _lyricsEnabled = MutableStateFlow(true)
     val lyricsEnabled: StateFlow<Boolean> = _lyricsEnabled.asStateFlow()
+    
+    // Navigation event for Go to Artist/Album (search query to trigger)
+    private val _navigateToSearch = MutableStateFlow<String?>(null)
+    val navigateToSearch: StateFlow<String?> = _navigateToSearch.asStateFlow()
+    
+    fun clearNavigateToSearch() {
+        _navigateToSearch.value = null
+    }
     
     init {
         // Auto-fetch lyrics when track changes
@@ -201,14 +212,25 @@ class PlayerViewModel @Inject constructor(
         _lyricsEnabled.value = !_lyricsEnabled.value
     }
     
-    // Stub methods for future features
+    // Go to Artist - triggers search for artist name
     fun goToArtist() {
-        // TODO: Navigate to artist screen
+        playbackState.value.currentTrack?.artist?.let { artist ->
+            _navigateToSearch.value = artist
+        }
         _showOptionsSheet.value = false
     }
     
     fun goToAlbum() {
-        // TODO: Navigate to album screen
+        val track = playbackState.value.currentTrack
+        if (track != null) {
+            // Search for album name, or artist + "album" if album is unknown
+            val query = if (track.album.isNotBlank() && track.album != "Unknown") {
+                track.album
+            } else {
+                "${track.artist ?: "Unknown"} album"
+            }
+            _navigateToSearch.value = query
+        }
         _showOptionsSheet.value = false
     }
     
@@ -259,7 +281,26 @@ class PlayerViewModel @Inject constructor(
     }
     
     fun createNewFolder() {
-        playlistManager.createPlaylist("New Folder", isFolder = true)
+        // Show folder name dialog instead of creating with hardcoded name
+        _showNewFolderDialog.value = true
+    }
+    
+    fun hideNewFolderDialog() {
+        _showNewFolderDialog.value = false
+    }
+    
+    fun confirmNewFolder(name: String) {
+        if (name.isNotBlank()) {
+            playlistManager.createPlaylist(name, isFolder = true)
+            // Add current track to the new folder
+            playbackState.value.currentTrack?.id?.let { trackId ->
+                val newFolder = playlistManager.playlists.value.lastOrNull()
+                newFolder?.let {
+                    playlistManager.addToPlaylist(it.id, trackId)
+                }
+            }
+        }
+        _showNewFolderDialog.value = false
         _showPlaylistSheet.value = false
     }
 }

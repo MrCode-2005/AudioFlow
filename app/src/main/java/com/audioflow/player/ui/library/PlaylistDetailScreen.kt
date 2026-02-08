@@ -9,7 +9,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
@@ -47,6 +50,11 @@ fun PlaylistDetailScreen(
     
     // Download state for playlist (simplified for now)
     var isDownloaded by remember { mutableStateOf(false) }
+    
+    // Dialog states
+    var showEditDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var editPlaylistName by remember { mutableStateOf("") }
     
     // Gradient based on artwork (placeholder logic, using green/grey)
     val gradientColors = listOf(
@@ -200,18 +208,28 @@ fun PlaylistDetailScreen(
                             ) {
                                 DropdownMenuItem(
                                     text = { Text("Add Songs") },
-                                    onClick = { showMenu = false /* TODO */ },
+                                    onClick = { 
+                                        showMenu = false 
+                                        // TODO: Navigate to Add Songs search
+                                    },
                                     leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Edit Playlist") },
-                                    onClick = { showMenu = false /* TODO */ },
+                                    onClick = { 
+                                        showMenu = false
+                                        editPlaylistName = playlist?.name ?: ""
+                                        showEditDialog = true
+                                    },
                                     leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
                                 )
                                 Divider()
                                 DropdownMenuItem(
                                     text = { Text("Delete Playlist", color = Color.Red) },
-                                    onClick = { showMenu = false /* TODO */ },
+                                    onClick = { 
+                                        showMenu = false
+                                        showDeleteConfirmDialog = true
+                                    },
                                     leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red) }
                                 )
                             }
@@ -236,17 +254,196 @@ fun PlaylistDetailScreen(
                     contentPadding = PaddingValues(bottom = 100.dp)
                 ) {
                     items(tracks) { track ->
-                        TrackListItem(
+                        PlaylistTrackItem(
                             track = track,
                             isPlaying = playbackState.currentTrack?.id == track.id,
                             onClick = { 
                                 viewModel.playTrack(track)
                                 onNavigateToPlayer()
                             },
-                            onDeleteClick = { viewModel.deleteTrack(track) }
+                            onDeleteClick = { viewModel.deleteTrack(track) },
+                            onMoveUpClick = { viewModel.moveTrackUp(track) },
+                            onMoveDownClick = { viewModel.moveTrackDown(track) },
+                            onDownloadClick = { viewModel.downloadTrack(track) }
                         )
                     }
                 }
+            }
+        }
+    }
+    
+    // Edit Playlist Dialog
+    if (showEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("Rename Playlist") },
+            text = {
+                TextField(
+                    value = editPlaylistName,
+                    onValueChange = { editPlaylistName = it },
+                    placeholder = { Text("Playlist name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.renamePlaylist(editPlaylistName)
+                        showEditDialog = false
+                    }
+                ) {
+                    Text("Rename")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+    
+    // Delete Confirmation Dialog
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("Delete Playlist?") },
+            text = { Text("This will permanently delete \"${playlist?.name}\". This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deletePlaylist()
+                        showDeleteConfirmDialog = false
+                        onNavigateBack()
+                    }
+                ) {
+                    Text("Delete", color = Color.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun PlaylistTrackItem(
+    track: Track,
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    onDeleteClick: () -> Unit,
+    onMoveUpClick: () -> Unit,
+    onMoveDownClick: () -> Unit,
+    onDownloadClick: () -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Album art
+        AsyncImage(
+            model = track.artworkUri,
+            contentDescription = "Album art",
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(4.dp)),
+            contentScale = ContentScale.Crop
+        )
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = track.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = if (isPlaying) SpotifyGreen else TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = track.artist,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        
+        // Playing indicator
+        if (isPlaying) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = "Now playing",
+                tint = SpotifyGreen,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+        
+        Box {
+            IconButton(onClick = { showMenu = true }) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    tint = TextSecondary
+                )
+            }
+            
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Move up") },
+                    onClick = {
+                        showMenu = false
+                        onMoveUpClick()
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.ArrowUpward, contentDescription = null)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Move down") },
+                    onClick = {
+                        showMenu = false
+                        onMoveDownClick()
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.ArrowDownward, contentDescription = null)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Download") },
+                    onClick = {
+                        showMenu = false
+                        onDownloadClick()
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.Download, contentDescription = null)
+                    }
+                )
+                Divider()
+                DropdownMenuItem(
+                    text = { Text("Remove from playlist", color = Color.Red) },
+                    onClick = {
+                        showMenu = false
+                        onDeleteClick()
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red)
+                    }
+                )
             }
         }
     }

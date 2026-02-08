@@ -39,6 +39,7 @@ import com.audioflow.player.ui.theme.*
 @Composable
 fun SearchScreen(
     onNavigateToPlayer: () -> Unit,
+    initialQuery: String? = null,
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -46,6 +47,14 @@ fun SearchScreen(
     val searchHistory by viewModel.searchHistory.collectAsState()
     val recentlyPlayedSongs by viewModel.recentlyPlayedSongs.collectAsState()
     val focusManager = LocalFocusManager.current
+    
+    // Auto-search if initialQuery is provided (e.g., from Go to Artist/Album)
+    LaunchedEffect(initialQuery) {
+        if (!initialQuery.isNullOrBlank()) {
+            viewModel.updateQuery(initialQuery)
+            viewModel.forceSearch(initialQuery)
+        }
+    }
     
     // Auto-dismiss keyboard when results load
     LaunchedEffect(uiState.shouldDismissKeyboard) {

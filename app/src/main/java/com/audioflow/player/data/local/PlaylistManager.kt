@@ -127,6 +127,40 @@ class PlaylistManager @Inject constructor(
         return _playlists.value.find { it.id == playlistId }
     }
     
+    /**
+     * Reorder playlists by swapping positions
+     */
+    fun reorderPlaylists(fromIndex: Int, toIndex: Int) {
+        val list = _playlists.value.toMutableList()
+        if (fromIndex in list.indices && toIndex in list.indices) {
+            val item = list.removeAt(fromIndex)
+            list.add(toIndex, item)
+            _playlists.value = list
+            savePlaylists()
+        }
+    }
+    
+    /**
+     * Reorder tracks within a playlist
+     */
+    fun reorderTrackInPlaylist(playlistId: String, fromIndex: Int, toIndex: Int) {
+        _playlists.value = _playlists.value.map { playlist ->
+            if (playlist.id == playlistId) {
+                val trackList = playlist.trackIds.toMutableList()
+                if (fromIndex in trackList.indices && toIndex in trackList.indices) {
+                    val item = trackList.removeAt(fromIndex)
+                    trackList.add(toIndex, item)
+                    playlist.copy(trackIds = trackList)
+                } else {
+                    playlist
+                }
+            } else {
+                playlist
+            }
+        }
+        savePlaylists()
+    }
+    
     private fun loadPlaylists() {
         val json = prefs.getString("playlists_json", null) ?: return
         try {

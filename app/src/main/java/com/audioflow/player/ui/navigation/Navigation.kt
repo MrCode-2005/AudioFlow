@@ -196,6 +196,26 @@ fun AudioFlowNavigation() {
                 )
             }
             
+            // Search with query parameter (for Go to Artist/Album)
+            composable(
+                route = "search?query={query}",
+                arguments = listOf(
+                    navArgument("query") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) { backStackEntry ->
+                val query = backStackEntry.arguments?.getString("query")
+                SearchScreen(
+                    onNavigateToPlayer = {
+                        navController.navigate(Screen.NowPlaying.route)
+                    },
+                    initialQuery = query
+                )
+            }
+            
             composable(
                 route = "${Screen.Library.route}?filter={filter}",
                 arguments = listOf(
@@ -282,6 +302,11 @@ fun AudioFlowNavigation() {
                 NowPlayingScreen(
                     onNavigateBack = {
                         navController.popBackStack()
+                    },
+                    onNavigateToSearch = { query ->
+                        navController.navigate("search?query=$query") {
+                            launchSingleTop = true
+                        }
                     }
                 )
             }
