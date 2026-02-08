@@ -712,21 +712,21 @@ class PlayerController @Inject constructor(
     }
     
     /**
-     * AGGRESSIVE PREFETCH: Prefetch 5 songs ahead and 2 behind for buttery smooth navigation
+     * AGGRESSIVE PREFETCH: Prefetch 10 songs ahead and 3 behind for buttery smooth navigation
      */
     private fun prefetchAdjacentYouTubeItems(currentIndex: Int) {
         Log.d(TAG, "Starting aggressive prefetch from index $currentIndex")
         
-        // Prefetch next 5 items for smooth forward navigation
-        for (i in 1..5) {
+        // Prefetch next 10 items for smooth forward navigation
+        for (i in 1..10) {
             val nextIndex = currentIndex + i
             if (nextIndex < youTubeQueue.size) {
                 prefetchYouTubeItemAt(nextIndex)
             }
         }
         
-        // Prefetch previous 2 items for smooth backward navigation
-        for (i in 1..2) {
+        // Prefetch previous 3 items for smooth backward navigation
+        for (i in 1..3) {
             val prevIndex = currentIndex - i
             if (prevIndex >= 0) {
                 prefetchYouTubeItemAt(prevIndex)

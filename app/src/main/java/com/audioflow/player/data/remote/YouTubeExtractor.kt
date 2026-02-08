@@ -194,7 +194,13 @@ class YouTubeExtractor @Inject constructor(
                 }
                 
                 Log.d(TAG, "Found ${results.size} search results")
-                Result.success(results.take(maxResults))
+                
+                // Filter out videos longer than 10 minutes (likely mixes/compilations)
+                val maxDurationMs = 10 * 60 * 1000L // 10 minutes
+                val filteredResults = results.filter { it.duration in 1..maxDurationMs }
+                Log.d(TAG, "Filtered to ${filteredResults.size} results (< 10 min duration)")
+                
+                Result.success(filteredResults.take(maxResults))
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Search failed: ${e.message}", e)
