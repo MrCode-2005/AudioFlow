@@ -1,5 +1,6 @@
 package com.audioflow.player.ui.library
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -38,13 +40,19 @@ fun DownloadsScreen(
     var isShuffleEnabled by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
     
-    // Filter to only completed downloads with valid files
-    val completedDownloads = remember(downloadedSongs) {
-        downloadedSongs.filter { entity ->
-            entity.status == DownloadStatus.COMPLETED &&
-            entity.localPath.isNotEmpty() &&
-            java.io.File(entity.localPath).exists()
-        }
+    // Count by status
+    val downloadingCount = downloadedSongs.count { it.status == DownloadStatus.DOWNLOADING }
+    val completedCount = downloadedSongs.count { it.status == DownloadStatus.COMPLETED }
+    val failedCount = downloadedSongs.count { it.status == DownloadStatus.FAILED }
+    
+    // Show ALL downloads (not just completed)
+    val allDownloads = downloadedSongs.sortedByDescending { it.timestamp }
+    
+    // Completed downloads for playback
+    val completedDownloads = downloadedSongs.filter { entity ->
+        entity.status == DownloadStatus.COMPLETED &&
+        entity.localPath.isNotEmpty() &&
+        java.io.File(entity.localPath).exists()
     }
     
     // Delete All Confirmation Dialog
@@ -52,7 +60,7 @@ fun DownloadsScreen(
         AlertDialog(
             onDismissRequest = { showDeleteAllDialog = false },
             title = { Text("Delete All Downloads?") },
-            text = { Text("This will remove all ${completedDownloads.size} downloaded songs. This action cannot be undone.") },
+            text = { Text("This will remove all ${allDownloads.size} downloads. This action cannot be undone.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -123,11 +131,31 @@ fun DownloadsScreen(
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
-                    Text(
-                        text = "${completedDownloads.size} songs",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextPrimary.copy(alpha = 0.7f)
-                    )
+                    // Show status breakdown
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${allDownloads.size} songs",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary.copy(alpha = 0.7f)
+                        )
+                        if (downloadingCount > 0) {
+                            Text(
+                                text = "• $downloadingCount downloading",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFFFA500) // Orange
+                            )
+                        }
+                        if (failedCount > 0) {
+                            Text(
+                                text = "• $failedCount failed",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Red
+                            )
+                        }
+                    }
                 }
             }
             
@@ -179,7 +207,7 @@ fun DownloadsScreen(
                     }
                 }
                 
-                // Play button
+                // Play button (only for completed downloads)
                 if (completedDownloads.isNotEmpty()) {
                     FloatingActionButton(
                         onClick = {
@@ -213,8 +241,8 @@ fun DownloadsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
             
-            // Downloaded Songs List
-            if (completedDownloads.isEmpty()) {
+            // Downloaded Songs List - NOW SHOWS ALL DOWNLOADS!
+            if (allDownloads.isEmpty()) {
                 // Empty state
                 Box(
                     modifier = Modifier
@@ -249,19 +277,22 @@ fun DownloadsScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 100.dp)
                 ) {
-                    itemsIndexed(completedDownloads) { index, entity ->
+                    itemsIndexed(allDownloads) { index, entity ->
                         DownloadedSongItem(
                             entity = entity,
                             index = index,
-                            totalCount = completedDownloads.size,
+                            totalCount = allDownloads.size,
                             onPlay = {
-                                val track = entityToTrack(entity)
-                                viewModel.playDownloadedTrack(track)
-                                onNavigateToPlayer()
+                                if (entity.status == DownloadStatus.COMPLETED) {
+                                    val track = entityToTrack(entity)
+                                    viewModel.playDownloadedTrack(track)
+                                    onNavigateToPlayer()
+                                }
                             },
                             onDelete = { viewModel.deleteDownload(entity.id) },
                             onMoveUp = { viewModel.moveDownloadUp(entity.id) },
-                            onMoveDown = { viewModel.moveDownloadDown(entity.id) }
+                            onMoveDown = { viewModel.moveDownloadDown(entity.id) },
+                            onRetry = { viewModel.retryDownload(entity.id) }
                         )
                     }
                 }
@@ -278,10 +309,23 @@ private fun DownloadedSongItem(
     onPlay: () -> Unit,
     onDelete: () -> Unit,
     onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit
+    onMoveDown: () -> Unit,
+    onRetry: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    
+    // Animation for downloading spinner
+    val infiniteTransition = rememberInfiniteTransition(label = "download_spinner")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotation"
+    )
     
     // Delete confirmation dialog
     if (showDeleteDialog) {
@@ -312,7 +356,17 @@ private fun DownloadedSongItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onPlay)
+            .clickable(
+                enabled = entity.status == DownloadStatus.COMPLETED,
+                onClick = onPlay
+            )
+            .background(
+                when (entity.status) {
+                    DownloadStatus.DOWNLOADING -> Color(0xFF1A1A1A) // Slight highlight
+                    DownloadStatus.FAILED -> Color(0xFF2A1515) // Red tint
+                    else -> Color.Transparent
+                }
+            )
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -335,28 +389,87 @@ private fun DownloadedSongItem(
             Text(
                 text = entity.title,
                 style = MaterialTheme.typography.titleSmall,
-                color = TextPrimary,
+                color = when (entity.status) {
+                    DownloadStatus.FAILED -> Color.Red.copy(alpha = 0.8f)
+                    DownloadStatus.DOWNLOADING -> Color(0xFFFFA500) // Orange
+                    else -> TextPrimary
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                text = entity.artist ?: "Unknown Artist",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = entity.artist ?: "Unknown Artist",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                // Status text for non-completed
+                when (entity.status) {
+                    DownloadStatus.DOWNLOADING -> {
+                        Text(
+                            text = "• Downloading...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFFFA500)
+                        )
+                    }
+                    DownloadStatus.FAILED -> {
+                        Text(
+                            text = "• Failed - Tap to retry",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Red
+                        )
+                    }
+                    else -> {}
+                }
+            }
         }
         
-        // Downloaded indicator
-        Icon(
-            imageVector = Icons.Default.CheckCircle,
-            contentDescription = "Downloaded",
-            tint = SpotifyGreen,
-            modifier = Modifier
-                .size(18.dp)
-                .padding(end = 4.dp)
-        )
+        // Status indicator
+        when (entity.status) {
+            DownloadStatus.COMPLETED -> {
+                // RED TICK for completed (as user requested)
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Downloaded",
+                    tint = Color.Red, // Changed to RED as requested
+                    modifier = Modifier
+                        .size(22.dp)
+                        .padding(end = 4.dp)
+                )
+            }
+            DownloadStatus.DOWNLOADING -> {
+                // Spinning refresh icon
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Downloading",
+                    tint = Color(0xFFFFA500), // Orange
+                    modifier = Modifier
+                        .size(22.dp)
+                        .rotate(rotation)
+                        .padding(end = 4.dp)
+                )
+            }
+            DownloadStatus.FAILED -> {
+                // Error icon - clickable for retry
+                IconButton(
+                    onClick = onRetry,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Retry download",
+                        tint = Color.Red,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
         
         // More options
         Box {
@@ -372,31 +485,36 @@ private fun DownloadedSongItem(
                 expanded = showMenu,
                 onDismissRequest = { showMenu = false }
             ) {
-                DropdownMenuItem(
-                    text = { Text("Play") },
-                    onClick = {
-                        showMenu = false
-                        onPlay()
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to queue") },
-                    onClick = {
-                        showMenu = false
-                        // TODO: Add to queue
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.QueueMusic, contentDescription = null)
-                    }
-                )
+                if (entity.status == DownloadStatus.COMPLETED) {
+                    DropdownMenuItem(
+                        text = { Text("Play") },
+                        onClick = {
+                            showMenu = false
+                            onPlay()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        }
+                    )
+                }
+                
+                if (entity.status == DownloadStatus.FAILED) {
+                    DropdownMenuItem(
+                        text = { Text("Retry Download") },
+                        onClick = {
+                            showMenu = false
+                            onRetry()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Refresh, contentDescription = null)
+                        }
+                    )
+                }
                 
                 HorizontalDivider()
                 
-                // Move Up (only if not first)
-                if (index > 0) {
+                // Move Up (only if not first and completed)
+                if (index > 0 && entity.status == DownloadStatus.COMPLETED) {
                     DropdownMenuItem(
                         text = { Text("Move Up") },
                         onClick = {
@@ -409,8 +527,8 @@ private fun DownloadedSongItem(
                     )
                 }
                 
-                // Move Down (only if not last)
-                if (index < totalCount - 1) {
+                // Move Down (only if not last and completed)
+                if (index < totalCount - 1 && entity.status == DownloadStatus.COMPLETED) {
                     DropdownMenuItem(
                         text = { Text("Move Down") },
                         onClick = {

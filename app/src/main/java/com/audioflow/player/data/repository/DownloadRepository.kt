@@ -163,4 +163,38 @@ class DownloadRepository @Inject constructor(
         downloadedSongDao.insert(current.copy(timestamp = target.timestamp))
         downloadedSongDao.insert(target.copy(timestamp = current.timestamp))
     }
+    
+    /**
+     * Retry a failed download
+     */
+    suspend fun retryDownload(trackId: String) {
+        val entity = downloadedSongDao.getDownloadedSong(trackId) ?: return
+        if (entity.status != DownloadStatus.FAILED) return
+        
+        // Reset status to downloading
+        downloadedSongDao.insert(entity.copy(status = DownloadStatus.DOWNLOADING))
+        
+        // Restart WorkManager job
+        val data = workDataOf(
+            "trackId" to entity.id,
+            "title" to entity.title,
+            "artist" to entity.artist,
+            "thumbnailUrl" to entity.thumbnailUrl
+        )
+
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val request = OneTimeWorkRequestBuilder<DownloadWorker>()
+            .setInputData(data)
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "download_${entity.id}",
+            ExistingWorkPolicy.REPLACE,
+            request
+        )
+    }
 }

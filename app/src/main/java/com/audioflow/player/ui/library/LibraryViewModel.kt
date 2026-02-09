@@ -221,4 +221,11 @@ class LibraryViewModel @Inject constructor(
     fun playDownloadedTrack(track: Track) {
         playerController.play(track)
     }
+    
+    // Retry a failed download
+    fun retryDownload(trackId: String) {
+        viewModelScope.launch {
+            downloadRepository.retryDownload(trackId)
+        }
+    }
 }
