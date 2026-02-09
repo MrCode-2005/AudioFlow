@@ -288,29 +288,26 @@ class SearchViewModel @Inject constructor(
                     // Save to search history on successful search
                     searchHistoryManager.addSearch(query)
                     
-                    // SIMPLIFIED: Just filter out very long videos (> 15 min) for music focus
-                    // Show results as-is like YouTube does
-                    val musicResults = results.filter { it.duration <= 15 * 60 * 1000L }
-                    
-                    Log.d(TAG, "Search returned ${results.size} results, ${musicResults.size} under 15min")
+                    // RAW RESULTS: No filtering - show exactly what YouTube returns
+                    Log.d(TAG, "Search returned ${results.size} raw results (no filtering)")
                     
                     _uiState.value = _uiState.value.copy(
-                        youtubeResults = musicResults,
-                        filteredResults = musicResults,
+                        youtubeResults = results,
+                        filteredResults = results,
                         tracks = emptyList(),
                         albums = emptyList(),
                         artists = emptyList(),
                         youtubeMetadata = null,
                         isSearching = false,
                         isYouTubeLoading = false,
-                        hasResults = musicResults.isNotEmpty(),
+                        hasResults = results.isNotEmpty(),
                         shouldDismissKeyboard = true
                     )
                     
-                    // AGGRESSIVE PREFETCH: Pre-extract first 5 results for instant playback
-                    if (musicResults.isNotEmpty()) {
-                        playerController.setYouTubeQueue(musicResults, -1) // Set queue without playing
-                        prefetchFirstSearchResults(musicResults.take(10))
+                    // AGGRESSIVE PREFETCH: Pre-extract first 10 results for instant playback
+                    if (results.isNotEmpty()) {
+                        playerController.setYouTubeQueue(results, -1) // Set queue without playing
+                        prefetchFirstSearchResults(results.take(10))
                     }
                 }
                 .onFailure { error ->

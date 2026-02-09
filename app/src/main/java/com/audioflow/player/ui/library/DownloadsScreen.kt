@@ -409,24 +409,40 @@ private fun DownloadedSongItem(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-                // Status text for non-completed
-                when (entity.status) {
-                    DownloadStatus.DOWNLOADING -> {
-                        Text(
-                            text = "• Downloading...",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFFFA500)
-                        )
-                    }
-                    DownloadStatus.FAILED -> {
-                        Text(
-                            text = "• Failed - Tap to retry",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Red
-                        )
-                    }
-                    else -> {}
+            }
+            
+            // Progress bar for downloading
+            if (entity.status == DownloadStatus.DOWNLOADING) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Animated progress bar
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp)),
+                        color = Color(0xFFFFA500), // Orange
+                        trackColor = Color(0xFF333333)
+                    )
+                    Text(
+                        text = "Downloading...",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFFFA500)
+                    )
                 }
+            }
+            
+            // Failed status text
+            if (entity.status == DownloadStatus.FAILED) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Failed - Tap to retry",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Red
+                )
             }
         }
         
@@ -444,14 +460,13 @@ private fun DownloadedSongItem(
                 )
             }
             DownloadStatus.DOWNLOADING -> {
-                // Spinning refresh icon
+                // Orange download icon (progress shown in row above)
                 Icon(
-                    imageVector = Icons.Default.Refresh,
+                    imageVector = Icons.Default.Download,
                     contentDescription = "Downloading",
-                    tint = Color(0xFFFFA500), // Orange
+                    tint = Color(0xFFFFA500),
                     modifier = Modifier
                         .size(22.dp)
-                        .rotate(rotation)
                         .padding(end = 4.dp)
                 )
             }
