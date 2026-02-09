@@ -191,4 +191,34 @@ class LibraryViewModel @Inject constructor(
             playlistManager.reorderPlaylists(index, index + 1)
         }
     }
+    
+    // Download Management
+    fun deleteDownload(trackId: String) {
+        viewModelScope.launch {
+            downloadRepository.deleteDownload(trackId)
+        }
+    }
+    
+    fun deleteAllDownloads() {
+        viewModelScope.launch {
+            downloadRepository.deleteAllDownloads()
+        }
+    }
+    
+    fun moveDownloadUp(trackId: String) {
+        viewModelScope.launch {
+            downloadRepository.reorderDownload(trackId, moveUp = true)
+        }
+    }
+    
+    fun moveDownloadDown(trackId: String) {
+        viewModelScope.launch {
+            downloadRepository.reorderDownload(trackId, moveUp = false)
+        }
+    }
+    
+    // Play downloaded track
+    fun playDownloadedTrack(track: Track) {
+        playerController.play(track)
+    }
 }
