@@ -281,7 +281,6 @@ class SearchViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isYouTubeLoading = true)
             
             // Use natural query without modifications to match YouTube's native behavior
-            // Adding extra keywords like "song official audio" can confuse results
             Log.d(TAG, "Searching YouTube with query: $query")
             
             mediaRepository.searchYouTube(query)
@@ -289,30 +288,29 @@ class SearchViewModel @Inject constructor(
                     // Save to search history on successful search
                     searchHistoryManager.addSearch(query)
                     
-                    // IMMEDIATE FILTERING: Remove unrelated content
-                    val filteredForRelevance = filterForRelevance(results, query)
+                    // SIMPLIFIED: Just filter out very long videos (> 15 min) for music focus
+                    // Show results as-is like YouTube does
+                    val musicResults = results.filter { it.duration <= 15 * 60 * 1000L }
                     
-                    Log.d(TAG, "Search returned ${results.size} results, filtered to ${filteredForRelevance.size} relevant")
+                    Log.d(TAG, "Search returned ${results.size} results, ${musicResults.size} under 15min")
                     
                     _uiState.value = _uiState.value.copy(
-                        youtubeResults = filteredForRelevance,
-                        filteredResults = filteredForRelevance, // Set initially, then filter
+                        youtubeResults = musicResults,
+                        filteredResults = musicResults,
                         tracks = emptyList(),
                         albums = emptyList(),
                         artists = emptyList(),
                         youtubeMetadata = null,
                         isSearching = false,
                         isYouTubeLoading = false,
-                        hasResults = filteredForRelevance.isNotEmpty(),
+                        hasResults = musicResults.isNotEmpty(),
                         shouldDismissKeyboard = true
                     )
-                    // Apply content filter after setting results
-                    applyContentFilter()
                     
                     // AGGRESSIVE PREFETCH: Pre-extract first 5 results for instant playback
-                    if (filteredForRelevance.isNotEmpty()) {
-                        playerController.setYouTubeQueue(filteredForRelevance, -1) // Set queue without playing
-                        prefetchFirstSearchResults(filteredForRelevance.take(5))
+                    if (musicResults.isNotEmpty()) {
+                        playerController.setYouTubeQueue(musicResults, -1) // Set queue without playing
+                        prefetchFirstSearchResults(musicResults.take(10))
                     }
                 }
                 .onFailure { error ->
@@ -617,7 +615,7 @@ class SearchViewModel @Inject constructor(
     }
     
     /**
-     * AGGRESSIVE PREFETCH: Pre-extract first 5 results in parallel for instant playback
+     * AGGRESSIVE PREFETCH: Pre-extract first 10 results in parallel for instant playback
      */
     private fun prefetchFirstSearchResults(results: List<YouTubeSearchResult>) {
         viewModelScope.launch {
