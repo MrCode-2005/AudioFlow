@@ -105,7 +105,9 @@ class PlayerViewModel @Inject constructor(
     fun downloadCurrentTrack() {
         val track = playbackState.value.currentTrack ?: return
         viewModelScope.launch {
-            downloadRepository.startDownload(track)
+            val newStatus = downloadRepository.toggleDownload(track)
+            _downloadStatus.value = newStatus
+            _isDownloaded.value = newStatus == com.audioflow.player.data.local.entity.DownloadStatus.COMPLETED
         }
     }
     
@@ -113,6 +115,8 @@ class PlayerViewModel @Inject constructor(
         val track = playbackState.value.currentTrack ?: return
         viewModelScope.launch {
             downloadRepository.deleteDownload(track.id)
+            _downloadStatus.value = com.audioflow.player.data.local.entity.DownloadStatus.FAILED
+            _isDownloaded.value = false
         }
     }
 

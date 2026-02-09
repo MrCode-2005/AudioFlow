@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.Flow
 interface DownloadedSongDao {
     @Query("SELECT * FROM downloaded_songs ORDER BY timestamp DESC")
     fun getAllDownloadedSongs(): Flow<List<DownloadedSongEntity>>
+    
+    @Query("SELECT * FROM downloaded_songs ORDER BY timestamp DESC")
+    suspend fun getAllDownloadedSongsSync(): List<DownloadedSongEntity>
 
     @Query("SELECT * FROM downloaded_songs WHERE id = :id")
     suspend fun getDownloadedSong(id: String): DownloadedSongEntity?
@@ -23,6 +26,9 @@ interface DownloadedSongDao {
 
     @Query("DELETE FROM downloaded_songs WHERE id = :id")
     suspend fun delete(id: String)
+    
+    @Query("DELETE FROM downloaded_songs")
+    suspend fun deleteAll()
     
     @Query("UPDATE downloaded_songs SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: String, status: String) // Using String for enum for simplicity via TypeConverter

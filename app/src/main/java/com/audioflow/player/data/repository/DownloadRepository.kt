@@ -34,6 +34,46 @@ class DownloadRepository @Inject constructor(
             list.find { it.id == trackId }?.status ?: DownloadStatus.FAILED
         }
     }
+    
+    /**
+     * Get current download entity (null if not downloaded/downloading)
+     */
+    suspend fun getDownloadEntity(trackId: String): DownloadedSongEntity? {
+        return downloadedSongDao.getDownloadedSong(trackId)
+    }
+    
+    /**
+     * Toggle download state: 
+     * - If not downloaded, start download
+     * - If downloading, cancel download
+     * - If completed, do nothing (already downloaded)
+     * Returns the new status
+     */
+    suspend fun toggleDownload(track: Track): DownloadStatus {
+        val existing = downloadedSongDao.getDownloadedSong(track.id)
+        
+        return when (existing?.status) {
+            DownloadStatus.COMPLETED -> DownloadStatus.COMPLETED // Already done
+            DownloadStatus.DOWNLOADING -> {
+                // Cancel the download
+                cancelDownload(track.id)
+                DownloadStatus.FAILED
+            }
+            else -> {
+                // Start new download
+                startDownload(track)
+                DownloadStatus.DOWNLOADING
+            }
+        }
+    }
+    
+    /**
+     * Cancel an in-progress download
+     */
+    suspend fun cancelDownload(trackId: String) {
+        WorkManager.getInstance(context).cancelUniqueWork("download_$trackId")
+        downloadedSongDao.delete(trackId)
+    }
 
     suspend fun startDownload(track: Track) {
         // Create initial entity with DOWNLOADING status
@@ -75,8 +115,7 @@ class DownloadRepository @Inject constructor(
     }
 
     suspend fun deleteDownload(trackId: String) {
-        // Delete file (Task for worker or here?)
-        // For simplicity, just delete DB entry. File cleanup should be done too.
+        // Delete file and DB entry
         val entity = downloadedSongDao.getDownloadedSong(trackId)
         if (entity != null && entity.localPath.isNotEmpty()) {
             try {
@@ -87,5 +126,41 @@ class DownloadRepository @Inject constructor(
         }
         downloadedSongDao.delete(trackId)
         WorkManager.getInstance(context).cancelUniqueWork("download_$trackId")
+    }
+    
+    /**
+     * Delete all downloads
+     */
+    suspend fun deleteAllDownloads() {
+        val all = downloadedSongDao.getAllDownloadedSongsSync()
+        all.forEach { entity ->
+            if (entity.localPath.isNotEmpty()) {
+                try {
+                    java.io.File(entity.localPath).delete()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            WorkManager.getInstance(context).cancelUniqueWork("download_${entity.id}")
+        }
+        downloadedSongDao.deleteAll()
+    }
+    
+    /**
+     * Reorder song in downloads list
+     */
+    suspend fun reorderDownload(trackId: String, moveUp: Boolean) {
+        val songs = downloadedSongDao.getAllDownloadedSongsSync().sortedBy { it.timestamp }
+        val index = songs.indexOfFirst { it.id == trackId }
+        if (index < 0) return
+        
+        val newIndex = if (moveUp) index - 1 else index + 1
+        if (newIndex < 0 || newIndex >= songs.size) return
+        
+        // Swap timestamp to change order
+        val current = songs[index]
+        val target = songs[newIndex]
+        downloadedSongDao.insert(current.copy(timestamp = target.timestamp))
+        downloadedSongDao.insert(target.copy(timestamp = current.timestamp))
     }
 }
