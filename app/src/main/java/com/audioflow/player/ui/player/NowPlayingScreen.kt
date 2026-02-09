@@ -516,11 +516,21 @@ fun NowPlayingScreen(
                     val context = LocalContext.current
                     
                     IconButton(onClick = {
-                        if (downloadStatus == com.audioflow.player.data.local.entity.DownloadStatus.COMPLETED) {
-                            viewModel.deleteDownload()
-                        } else if (downloadStatus != com.audioflow.player.data.local.entity.DownloadStatus.DOWNLOADING) {
-                            viewModel.downloadCurrentTrack()
-                            Toast.makeText(context, "Starting Downloads!", Toast.LENGTH_SHORT).show()
+                        when (downloadStatus) {
+                            com.audioflow.player.data.local.entity.DownloadStatus.COMPLETED -> {
+                                // Already downloaded - show toast, don't delete automatically
+                                Toast.makeText(context, "Already downloaded", Toast.LENGTH_SHORT).show()
+                            }
+                            com.audioflow.player.data.local.entity.DownloadStatus.DOWNLOADING -> {
+                                // Cancel the download
+                                viewModel.downloadCurrentTrack() // toggleDownload will cancel it
+                                Toast.makeText(context, "Download cancelled", Toast.LENGTH_SHORT).show()
+                            }
+                            else -> {
+                                // Start download
+                                viewModel.downloadCurrentTrack()
+                                Toast.makeText(context, "Starting download...", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }) {
                         when (downloadStatus) {
@@ -536,7 +546,7 @@ fun NowPlayingScreen(
                                 )
                                 Icon(
                                     imageVector = Icons.Default.Refresh, // Clockwise rotation effect
-                                    contentDescription = "Downloading",
+                                    contentDescription = "Downloading - tap to cancel",
                                     tint = SpotifyGreen,
                                     modifier = Modifier.rotate(angle)
                                 )
@@ -545,7 +555,7 @@ fun NowPlayingScreen(
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = "Downloaded",
-                                    tint = Color.Red
+                                    tint = SpotifyGreen // Green checkmark instead of red
                                 )
                             }
                             else -> {
@@ -560,14 +570,6 @@ fun NowPlayingScreen(
                     }
                     
                     Row {
-                        IconButton(onClick = { /* Share */ }) {
-                            Icon(
-                                imageVector = Icons.Default.Share,
-                                contentDescription = "Share",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
                         IconButton(onClick = { /* Queue */ }) {
                             Icon(
                                 imageVector = Icons.Default.QueueMusic,

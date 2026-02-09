@@ -200,16 +200,6 @@ fun TrackListItem(
                             Icon(Icons.Default.QueueMusic, contentDescription = null)
                         }
                     )
-                    DropdownMenuItem(
-                        text = { Text("Share") },
-                        onClick = {
-                            showMenu = false
-                            // TODO: Share functionality
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.Share, contentDescription = null)
-                        }
-                    )
                     if (onDeleteClick != null) {
                         Divider()
                         DropdownMenuItem(
