@@ -15,6 +15,7 @@ import com.audioflow.player.service.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -87,16 +88,18 @@ class SearchViewModel @Inject constructor(
     val recentlyPlayedSongs = recentlyPlayedManager.recentSongs
     
     private var searchJob: Job? = null
+    private var prefetchJob: Job? = null
     
     fun updateQuery(query: String) {
-        // Clear results immediately when query changes to avoid showing stale results
+        // Update query text but DON'T clear results while typing
         _uiState.value = _uiState.value.copy(
             query = query,
             shouldDismissKeyboard = false
         )
         
-        // Cancel previous search
+        // Cancel previous search AND prefetch jobs
         searchJob?.cancel()
+        prefetchJob?.cancel()
         
         if (query.isBlank()) {
             // Clear results when query is empty
@@ -114,17 +117,13 @@ class SearchViewModel @Inject constructor(
             return
         }
         
-        // Clear YouTube results immediately to prevent showing old results
-        if (_uiState.value.searchMode == SearchMode.YOUTUBE) {
-            _uiState.value = _uiState.value.copy(
-                youtubeResults = emptyList(),
-                filteredResults = emptyList(),
-                isSearching = true
-            )
-        }
+        // Show loading indicator but KEEP old results visible while typing
+        _uiState.value = _uiState.value.copy(isSearching = true)
         
-        // FAST DEBOUNCE: 100ms for YouTube, 80ms for local (minimum for typing)
-        val debounceTime = if (_uiState.value.searchMode == SearchMode.YOUTUBE) 100L else 80L
+        // PROPER DEBOUNCE: 600ms for YouTube (wait for user to finish typing)
+        // This prevents searching for "S", "St", "Sta", "Star" etc.
+        // Only fires search after user stops typing for 600ms
+        val debounceTime = if (_uiState.value.searchMode == SearchMode.YOUTUBE) 600L else 150L
         searchJob = viewModelScope.launch {
             delay(debounceTime)
             performSearch(query)
@@ -304,10 +303,14 @@ class SearchViewModel @Inject constructor(
                         shouldDismissKeyboard = true
                     )
                     
-                    // AGGRESSIVE PREFETCH: Pre-extract first 10 results for instant playback
+                    // Set queue for navigation
                     if (results.isNotEmpty()) {
-                        playerController.setYouTubeQueue(results, -1) // Set queue without playing
-                        prefetchFirstSearchResults(results.take(10))
+                        playerController.setYouTubeQueue(results, -1)
+                        
+                        // PREFETCH: Cancel any old prefetch and start new one
+                        // Only prefetch after FINAL results are shown
+                        prefetchJob?.cancel()
+                        prefetchJob = prefetchFirstSearchResults(results.take(10))
                     }
                 }
                 .onFailure { error ->
@@ -612,15 +615,18 @@ class SearchViewModel @Inject constructor(
     }
     
     /**
-     * AGGRESSIVE PREFETCH: Pre-extract first 10 results in parallel for instant playback
+     * PREFETCH: Pre-extract URLs for instant next/prev playback.
+     * Returns the Job so it can be cancelled when a new search starts.
+     * Uses sequential extraction to avoid hogging yt-dlp.
      */
-    private fun prefetchFirstSearchResults(results: List<YouTubeSearchResult>) {
-        viewModelScope.launch {
-            Log.d(TAG, "Prefetching ${results.size} search results in parallel...")
+    private fun prefetchFirstSearchResults(results: List<YouTubeSearchResult>): Job {
+        return viewModelScope.launch {
+            Log.d(TAG, "Prefetching ${results.size} search results...")
             
-            // Launch all prefetches in parallel for maximum speed
-            results.map { result ->
-                async {
+            // Extract sequentially (not parallel!) to avoid blocking yt-dlp
+            // If user starts new search, this job gets cancelled
+            for (result in results) {
+                try {
                     mediaRepository.getYouTubeStreamUrl(result.videoId)
                         .onSuccess {
                             Log.d(TAG, "✓ Prefetched: ${result.title}")
@@ -628,8 +634,11 @@ class SearchViewModel @Inject constructor(
                         .onFailure {
                             Log.w(TAG, "✗ Prefetch failed: ${result.title}")
                         }
+                } catch (e: CancellationException) {
+                    Log.d(TAG, "Prefetch cancelled (new search started)")
+                    throw e // Re-throw to properly cancel
                 }
-            }.awaitAll()
+            }
             
             Log.d(TAG, "All prefetches completed")
         }
