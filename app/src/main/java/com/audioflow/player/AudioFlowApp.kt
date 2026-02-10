@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import android.util.Log
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import dagger.hilt.android.HiltAndroidApp
@@ -12,11 +14,22 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 private const val TAG = "AudioFlowApp"
 
 @HiltAndroidApp
-class AudioFlowApp : Application() {
+class AudioFlowApp : Application(), Configuration.Provider {
+    
+    // Hilt worker factory for @HiltWorker support (DownloadWorker)
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
+    
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .setMinimumLoggingLevel(Log.DEBUG)
+            .build()
     
     companion object {
         const val NOTIFICATION_CHANNEL_ID = "audioflow_playback"
