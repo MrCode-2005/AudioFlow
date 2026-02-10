@@ -116,7 +116,7 @@ fun AddToPlaylistSheet(
                     },
                     title = "Liked Songs",
                     subtitle = null,
-                    showAddIcon = isLiked,
+                    isAdded = isLiked,
                     onClick = onLikedSongsClick
                 )
                 
@@ -145,7 +145,7 @@ fun AddToPlaylistSheet(
                     },
                     title = "New Folder",
                     subtitle = null,
-                    showAddIcon = false,
+                    isAdded = false,
                     onClick = onNewFolderClick
                 )
                 
@@ -180,7 +180,7 @@ fun AddToPlaylistSheet(
                         },
                         title = playlist.name,
                         subtitle = "${playlist.songCount} song${if (playlist.songCount != 1) "s" else ""}",
-                        showAddIcon = false,
+                        isAdded = false,
                         onClick = { onPlaylistClick(playlist) }
                     )
                 }
@@ -205,7 +205,7 @@ fun AddToPlaylistSheet(
                     },
                     title = "New playlist",
                     subtitle = null,
-                    showAddIcon = false,
+                    isAdded = false,
                     onClick = onNewPlaylistClick
                 )
                 
@@ -234,7 +234,7 @@ private fun SheetListItem(
     icon: @Composable () -> Unit,
     title: String,
     subtitle: String?,
-    showAddIcon: Boolean,
+    isAdded: Boolean,
     onClick: () -> Unit
 ) {
     Row(
@@ -265,10 +265,19 @@ private fun SheetListItem(
             }
         }
         
-        if (showAddIcon) {
+        if (isAdded) {
+            // Green checkmark when song IS in this playlist/liked
+            Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = "Added",
+                tint = SpotifyGreen,
+                modifier = Modifier.size(24.dp)
+            )
+        } else {
+            // Plus icon when song is NOT in this playlist
             Icon(
                 imageVector = Icons.Default.AddCircleOutline,
-                contentDescription = "Added",
+                contentDescription = "Add",
                 tint = TextSecondary,
                 modifier = Modifier.size(24.dp)
             )
