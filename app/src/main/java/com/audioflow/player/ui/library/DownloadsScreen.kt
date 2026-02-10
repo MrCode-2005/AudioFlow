@@ -1,6 +1,9 @@
 package com.audioflow.player.ui.library
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -28,6 +31,7 @@ import coil.compose.AsyncImage
 import com.audioflow.player.data.local.entity.DownloadStatus
 import com.audioflow.player.data.local.entity.DownloadedSongEntity
 import com.audioflow.player.model.Track
+import com.audioflow.player.ui.components.MiniPlayer
 import com.audioflow.player.ui.theme.*
 
 @Composable
@@ -37,6 +41,7 @@ fun DownloadsScreen(
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val downloadedSongs by viewModel.downloadedSongs.collectAsState(initial = emptyList())
+    val playbackState by viewModel.playbackState.collectAsState()
     var isShuffleEnabled by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
     
@@ -297,6 +302,22 @@ fun DownloadsScreen(
                     }
                 }
             }
+        }
+        
+        // Mini Player - persists across all screens
+        AnimatedVisibility(
+            visible = playbackState.currentTrack != null,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it }
+        ) {
+            MiniPlayer(
+                playbackState = playbackState,
+                onPlayPauseClick = { viewModel.togglePlayPause() },
+                onNextClick = { viewModel.playNext() },
+                onClick = onNavigateToPlayer,
+                modifier = Modifier.padding(bottom = 0.dp)
+            )
         }
     }
 }
