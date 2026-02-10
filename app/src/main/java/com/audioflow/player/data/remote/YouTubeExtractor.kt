@@ -84,6 +84,42 @@ class YouTubeExtractor @Inject constructor(
         data class NetworkError(override val message: String) : YouTubeError()
     }
     
+    // ==================== SHARED URL CACHE ====================
+    // This cache is shared by ALL callers (SearchViewModel prefetch, 
+    // PlayerController, DownloadWorker). One extraction serves everyone.
+    private data class CachedStream(val streamInfo: YouTubeStreamInfo, val timestamp: Long)
+    private val streamCache = mutableMapOf<String, CachedStream>()
+    private val STREAM_CACHE_DURATION = 14 * 60 * 1000L // 14 minutes (YouTube URLs expire ~15min)
+    
+    /**
+     * Get cached stream info if available and not expired
+     */
+    fun getCachedStreamUrl(videoId: String): YouTubeStreamInfo? {
+        val cached = streamCache[videoId] ?: return null
+        return if (System.currentTimeMillis() - cached.timestamp < STREAM_CACHE_DURATION) {
+            Log.d(TAG, "⚡ CACHE HIT for $videoId (instant!)")
+            cached.streamInfo
+        } else {
+            streamCache.remove(videoId)
+            null
+        }
+    }
+    
+    /**
+     * Store stream info in shared cache
+     */
+    private fun cacheStreamInfo(videoId: String, streamInfo: YouTubeStreamInfo) {
+        streamCache[videoId] = CachedStream(streamInfo, System.currentTimeMillis())
+        Log.d(TAG, "Cached stream URL for $videoId (${streamCache.size} total cached)")
+        
+        // Cleanup old entries if cache gets too large
+        if (streamCache.size > 50) {
+            val now = System.currentTimeMillis()
+            streamCache.entries.removeAll { now - it.value.timestamp > STREAM_CACHE_DURATION }
+        }
+    }
+    // ===========================================================
+    
     // OkHttp client for URL validation (same config as MusicService)
     private val validationClient by lazy {
         OkHttpClient.Builder()
@@ -317,6 +353,11 @@ class YouTubeExtractor @Inject constructor(
         withContext(Dispatchers.IO) {
             Log.d(TAG, "Extracting stream for: $videoId")
             
+            // CHECK CACHE FIRST - instant return if cached!
+            getCachedStreamUrl(videoId)?.let { cached ->
+                return@withContext Result.success(cached)
+            }
+            
             // Wait for yt-dlp initialization (with timeout)
             var attempts = 0
             while (!com.audioflow.player.AudioFlowApp.isYtDlpReady && attempts < 50) {
@@ -335,6 +376,8 @@ class YouTubeExtractor @Inject constructor(
                 try {
                     val result = extractStreamUrlInternal(videoId, retryAttempt)
                     if (result.isSuccess) {
+                        // CACHE the result for all future callers
+                        result.getOrNull()?.let { cacheStreamInfo(videoId, it) }
                         return@withContext result
                     }
                     lastException = result.exceptionOrNull() as? Exception
@@ -345,9 +388,9 @@ class YouTubeExtractor @Inject constructor(
                         return@withContext result
                     }
                     
-                    // Wait before retry with exponential backoff
+                    // Faster retry - reduced backoff
                     if (retryAttempt < 2) {
-                        val delayMs = (retryAttempt + 1) * 500L
+                        val delayMs = (retryAttempt + 1) * 300L
                         Log.d(TAG, "Retrying extraction in ${delayMs}ms (attempt ${retryAttempt + 2}/3)")
                         delay(delayMs)
                     }
@@ -355,7 +398,7 @@ class YouTubeExtractor @Inject constructor(
                     lastException = e
                     Log.e(TAG, "Extraction attempt ${retryAttempt + 1} failed: ${e.message}")
                     if (retryAttempt < 2) {
-                        delay((retryAttempt + 1) * 500L)
+                        delay((retryAttempt + 1) * 300L)
                     }
                 }
             }
