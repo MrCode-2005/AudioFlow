@@ -67,16 +67,16 @@ class DownloadWorker @AssistedInject constructor(
             request.addOption("--no-warnings")
             request.addOption("--no-check-certificate")
             
-            // Download BEST AUDIO in native format (no conversion = no ffmpeg needed = faster)
-            // Request m4a first (most compatible), fall back to any audio
-            request.addOption("-f", "bestaudio[ext=m4a]/bestaudio")
+            // PERMISSIVE format: try many fallbacks to ensure something downloads
+            // Android client has limited formats, so use broad selectors
+            request.addOption("-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[ext=m4a]/best")
             
             // DON'T use -x or --audio-format (requires ffmpeg processing = slow/hangs)
             // Just download the raw audio stream directly
             
-            // Use Android player client
-            request.addOption("--extractor-args", "youtube:player_client=android")
-            request.addOption("--user-agent", "com.google.android.youtube/19.09.36 (Linux; U; Android 14) gzip")
+            // Use default player client (web has more formats than android)
+            // Don't restrict to android client since it limits available formats
+            request.addOption("--user-agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
             
             // Output to specific file
             val outputPath = "${downloadDir.absolutePath}/${videoId}.%(ext)s"
