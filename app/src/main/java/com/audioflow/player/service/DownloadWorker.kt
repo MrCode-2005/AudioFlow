@@ -29,10 +29,10 @@ class DownloadWorker @AssistedInject constructor(
         val trackId = inputData.getString("trackId") ?: return@withContext Result.failure()
         
         try {
-            Log.d(TAG, "Starting download for: $trackId")
+            Log.d(TAG, "=== DOWNLOAD START for: $trackId ===")
             
             // Update status to DOWNLOADING
-            updateProgress(trackId, 0, "Preparing...")
+            updateProgress(trackId, 5, "Preparing...")
             downloadedSongDao.updateStatus(trackId, DownloadStatus.DOWNLOADING.name)
 
             // Wait for yt-dlp initialization
@@ -45,6 +45,8 @@ class DownloadWorker @AssistedInject constructor(
             if (!com.audioflow.player.AudioFlowApp.isYtDlpReady) {
                 throw Exception("yt-dlp not initialized")
             }
+            
+            Log.d(TAG, "yt-dlp is ready")
 
             // Setup download directory
             val downloadDir = File(applicationContext.filesDir, "downloads")
@@ -53,70 +55,77 @@ class DownloadWorker @AssistedInject constructor(
             val videoId = trackId.removePrefix("yt_")
             val videoUrl = "https://www.youtube.com/watch?v=$videoId"
             
-            // Use yt-dlp to download - it handles all YouTube throttling/signatures
+            // Clean up any previous partial downloads for this video
+            downloadDir.listFiles()?.filter { it.name.startsWith(videoId) }?.forEach { 
+                it.delete()
+                Log.d(TAG, "Cleaned up old file: ${it.name}")
+            }
+            
+            // Build yt-dlp request - SIMPLE and RELIABLE
             val request = YoutubeDLRequest(videoUrl)
             request.addOption("--no-playlist")
             request.addOption("--no-warnings")
             request.addOption("--no-check-certificate")
             
-            // Download audio only, best quality m4a
-            request.addOption("-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best")
-            request.addOption("-x") // Extract audio
-            request.addOption("--audio-format", "m4a") // Convert to m4a
-            request.addOption("--audio-quality", "0") // Best quality
+            // Download BEST AUDIO in native format (no conversion = no ffmpeg needed = faster)
+            // Request m4a first (most compatible), fall back to any audio
+            request.addOption("-f", "bestaudio[ext=m4a]/bestaudio")
             
-            // Use Android player client for reliable URLs
+            // DON'T use -x or --audio-format (requires ffmpeg processing = slow/hangs)
+            // Just download the raw audio stream directly
+            
+            // Use Android player client
             request.addOption("--extractor-args", "youtube:player_client=android")
             request.addOption("--user-agent", "com.google.android.youtube/19.09.36 (Linux; U; Android 14) gzip")
             
-            // Output path
-            val outputTemplate = "${downloadDir.absolutePath}/${videoId}.%(ext)s"
-            request.addOption("-o", outputTemplate)
+            // Output to specific file
+            val outputPath = "${downloadDir.absolutePath}/${videoId}.%(ext)s"
+            request.addOption("-o", outputPath)
             
-            // Socket timeout for faster failure
+            // Timeout and retries
             request.addOption("--socket-timeout", "15")
-            request.addOption("--retries", "3")
+            request.addOption("--retries", "2")
+            request.addOption("--fragment-retries", "2")
+            
+            // Throttle protection
+            request.addOption("--throttled-rate", "100K")
             
             updateProgress(trackId, 10, "Downloading...")
-            Log.d(TAG, "Starting yt-dlp download for $videoId")
+            Log.d(TAG, "Executing yt-dlp download for: $videoUrl")
+            val startTime = System.currentTimeMillis()
             
-            // Execute download with progress callback
-            val response = YoutubeDL.getInstance().execute(
-                request
-            ) { progress, etaInSeconds, _ ->
-                // progress is 0-100 float
-                val percent = progress.toInt().coerceIn(10, 99)
-                val eta = if (etaInSeconds > 0) "${etaInSeconds}s left" else "Downloading..."
-                val msg = "${percent}% • $eta"
-                
-                // Update progress on main scope (can't use suspend here)
-                Log.d(TAG, "Download progress: $msg")
-                
-                // WorkManager progress update via runBlocking since callback isn't suspend
-                kotlinx.coroutines.runBlocking {
-                    updateProgress(trackId, percent, msg)
-                }
-            }
+            // Execute download - NO progress callback to avoid deadlock
+            // (runBlocking inside withContext(Dispatchers.IO) = deadlock!)
+            val response = YoutubeDL.getInstance().execute(request)
             
-            Log.d(TAG, "yt-dlp exit code: ${response.exitCode}")
-            Log.d(TAG, "yt-dlp output: ${response.out?.take(200)}")
+            val elapsed = (System.currentTimeMillis() - startTime) / 1000
+            Log.d(TAG, "yt-dlp finished in ${elapsed}s, exit code: ${response.exitCode}")
+            Log.d(TAG, "yt-dlp stdout: ${response.out?.take(500)}")
             
             if (response.exitCode != 0) {
-                val errorMsg = response.err?.take(200) ?: "Unknown error"
-                Log.e(TAG, "yt-dlp error: $errorMsg")
-                throw Exception("Download failed: $errorMsg")
+                val errorMsg = response.err?.take(300) ?: "Unknown download error"
+                Log.e(TAG, "yt-dlp stderr: $errorMsg")
+                throw Exception("Download failed (exit ${response.exitCode}): $errorMsg")
             }
             
-            // Find the downloaded file (may have .m4a or .webm extension)
-            val downloadedFile = downloadDir.listFiles()?.find { 
-                it.name.startsWith(videoId) && it.length() > 0 
+            // Find the downloaded file
+            val downloadedFile = downloadDir.listFiles()
+                ?.filter { it.name.startsWith(videoId) && it.length() > 0 }
+                ?.maxByOrNull { it.length() } // Pick largest if multiple
+            
+            if (downloadedFile == null || !downloadedFile.exists()) {
+                // List all files for debugging
+                val files = downloadDir.listFiles()?.map { "${it.name} (${it.length()})" }
+                Log.e(TAG, "No file found! Files in dir: $files")
+                throw Exception("Download produced no file")
             }
             
-            if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
-                throw Exception("Download failed - no file produced")
+            if (downloadedFile.length() == 0L) {
+                downloadedFile.delete()
+                throw Exception("Download produced empty file")
             }
             
-            Log.d(TAG, "Downloaded file: ${downloadedFile.name} (${downloadedFile.length() / 1024} KB)")
+            Log.d(TAG, "Downloaded: ${downloadedFile.name} (${downloadedFile.length() / 1024} KB)")
 
             // Update DB with path and COMPLETED status
             val entity = downloadedSongDao.getDownloadedSong(trackId)
@@ -125,17 +134,17 @@ class DownloadWorker @AssistedInject constructor(
                     localPath = downloadedFile.absolutePath,
                     status = DownloadStatus.COMPLETED
                 ))
-                Log.d(TAG, "Updated DB: ${downloadedFile.absolutePath}")
+                Log.d(TAG, "DB updated with path: ${downloadedFile.absolutePath}")
             } else {
                 Log.e(TAG, "Entity not found in DB for: $trackId")
             }
             
             updateProgress(trackId, 100, "Complete")
-            Log.d(TAG, "Download complete: $trackId (${downloadedFile.length() / 1024} KB)")
+            Log.d(TAG, "=== DOWNLOAD COMPLETE: $trackId (${downloadedFile.length() / 1024} KB in ${elapsed}s) ===")
 
             Result.success()
         } catch (e: Exception) {
-            Log.e(TAG, "Download failed for $trackId: ${e.message}", e)
+            Log.e(TAG, "=== DOWNLOAD FAILED for $trackId: ${e.message} ===", e)
             downloadedSongDao.updateStatus(trackId, DownloadStatus.FAILED.name)
             Result.failure(workDataOf("error" to (e.message ?: "Unknown error")))
         }
@@ -145,11 +154,15 @@ class DownloadWorker @AssistedInject constructor(
      * Update download progress for UI
      */
     private suspend fun updateProgress(trackId: String, progress: Int, message: String) {
-        Log.d(TAG, "Progress: $trackId - $progress% - $message")
-        setProgress(workDataOf(
-            "trackId" to trackId,
-            "progress" to progress,
-            "message" to message
-        ))
+        try {
+            setProgress(workDataOf(
+                "trackId" to trackId,
+                "progress" to progress,
+                "message" to message
+            ))
+        } catch (e: Exception) {
+            // Ignore progress update failures - don't let them crash the download
+            Log.w(TAG, "Progress update failed: ${e.message}")
+        }
     }
 }
