@@ -555,7 +555,7 @@ fun NowPlayingScreen(
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = "Downloaded",
-                                    tint = SpotifyGreen // Green checkmark instead of red
+                                    tint = Color.Red // Red checkmark for downloaded songs
                                 )
                             }
                             else -> {
