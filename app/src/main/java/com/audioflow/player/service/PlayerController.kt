@@ -59,6 +59,8 @@ class PlayerController @Inject constructor(
     // YouTube search results queue for next/previous navigation
     private var youTubeQueue: List<YouTubeSearchResult> = emptyList()
     private var youTubeQueueIndex: Int = -1
+    // Full Track stubs with thumbnails for YouTube queue (enables carousel prev/next art)
+    private var youTubeQueueTracks: MutableList<Track> = mutableListOf()
     
     // Playlist queue for mixed/remote tracks that need lazy loading
     private var playlistQueue: List<Track> = emptyList()
@@ -344,8 +346,9 @@ class PlayerController @Inject constructor(
                 Player.REPEAT_MODE_ALL -> RepeatMode.ALL
                 else -> RepeatMode.OFF
             },
-            queue = currentQueue,
-            currentQueueIndex = currentIndex
+            // Use full YouTube queue tracks for carousel display (shows prev/next album art)
+            queue = if (youTubeQueueTracks.isNotEmpty()) youTubeQueueTracks else currentQueue,
+            currentQueueIndex = if (youTubeQueueTracks.isNotEmpty()) youTubeQueueIndex else currentIndex
         )
     }
     
@@ -488,6 +491,10 @@ class PlayerController @Inject constructor(
                     val preparedTrack = preparedTracks[nextResult.videoId]
                     if (preparedTrack != null) {
                         currentQueue = listOf(preparedTrack)
+                        // Update the YouTube queue stub with resolved track data
+                        if (nextIndex in youTubeQueueTracks.indices) {
+                            youTubeQueueTracks[nextIndex] = preparedTrack
+                        }
                         recentlyPlayedManager.addSong(
                             id = preparedTrack.id,
                             title = preparedTrack.title,
@@ -538,6 +545,10 @@ class PlayerController @Inject constructor(
                     Log.d(TAG, "⚡ INSTANT PREVIOUS: Using pre-prepared MediaItem - zero delay!")
                     youTubeQueueIndex = prevIndex
                     currentQueue = listOf(preparedTrack)
+                    // Update the YouTube queue stub with resolved track data
+                    if (prevIndex in youTubeQueueTracks.indices) {
+                        youTubeQueueTracks[prevIndex] = preparedTrack
+                    }
                     
                     recentlyPlayedManager.addSong(
                         id = preparedTrack.id,
@@ -587,7 +598,22 @@ class PlayerController @Inject constructor(
     fun setYouTubeQueue(results: List<YouTubeSearchResult>, currentIndex: Int) {
         youTubeQueue = results
         youTubeQueueIndex = currentIndex
-        Log.d(TAG, "YouTube queue set with ${results.size} items, starting at index $currentIndex")
+        
+        // Build Track stubs with thumbnails for carousel prev/next art display
+        youTubeQueueTracks = results.map { result ->
+            Track(
+                id = "yt_${result.videoId}",
+                title = result.title,
+                artist = result.artist,
+                album = "YouTube",
+                duration = result.duration,
+                artworkUri = Uri.parse(result.thumbnailUrl),
+                contentUri = Uri.parse("https://www.youtube.com/watch?v=${result.videoId}"),
+                source = com.audioflow.player.model.TrackSource.YOUTUBE
+            )
+        }.toMutableList()
+        
+        Log.d(TAG, "YouTube queue set with ${results.size} items (with thumbnails), starting at index $currentIndex")
     }
     
     /**
@@ -596,6 +622,7 @@ class PlayerController @Inject constructor(
     fun clearYouTubeQueue() {
         youTubeQueue = emptyList()
         youTubeQueueIndex = -1
+        youTubeQueueTracks.clear()
     }
     
     fun clearPlaylistQueue() {
@@ -641,6 +668,10 @@ class PlayerController @Inject constructor(
                     
                     val track = mediaRepository.createTrackFromYouTube(streamInfo)
                     currentQueue = listOf(track)
+                    // Update the YouTube queue stub with resolved track data
+                    if (index in youTubeQueueTracks.indices) {
+                        youTubeQueueTracks[index] = track
+                    }
                     
                     // Save to recently played
                     recentlyPlayedManager.addSong(
@@ -690,6 +721,10 @@ class PlayerController @Inject constructor(
             source = com.audioflow.player.model.TrackSource.YOUTUBE
         )
         currentQueue = listOf(track)
+        // Update the YouTube queue stub with resolved track data
+        if (youTubeQueueIndex in youTubeQueueTracks.indices) {
+            youTubeQueueTracks[youTubeQueueIndex] = track
+        }
         
         // Save to recently played
         recentlyPlayedManager.addSong(
