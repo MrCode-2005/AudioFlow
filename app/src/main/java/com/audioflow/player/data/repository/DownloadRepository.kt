@@ -150,7 +150,7 @@ class DownloadRepository @Inject constructor(
      * Reorder song in downloads list
      */
     suspend fun reorderDownload(trackId: String, moveUp: Boolean) {
-        val songs = downloadedSongDao.getAllDownloadedSongsSync().sortedBy { it.timestamp }
+        val songs = downloadedSongDao.getAllDownloadedSongsSync().sortedByDescending { it.timestamp }
         val index = songs.indexOfFirst { it.id == trackId }
         if (index < 0) return
         
