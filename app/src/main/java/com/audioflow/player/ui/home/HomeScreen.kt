@@ -47,6 +47,15 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
     val recentlyPlayedSongs by viewModel.recentlyPlayedSongs.collectAsState()
+    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+    
+    // Show error snackbar when play error occurs
+    LaunchedEffect(uiState.playError) {
+        uiState.playError?.let { error ->
+            snackbarHostState.showSnackbar(error)
+            viewModel.clearPlayError()
+        }
+    }
     
     // Load music and recommendations when screen is displayed
     LaunchedEffect(Unit) {
@@ -208,7 +217,10 @@ fun HomeScreen(
                             items(recentlyPlayedSongs.take(10)) { song ->
                                 RecentSongCard(
                                     song = song,
-                                    onClick = { /* TODO: Play this song */ }
+                                    onClick = {
+                                        viewModel.playRecentSong(song)
+                                        onNavigateToPlayer()
+                                    }
                                 )
                             }
                         }
@@ -268,6 +280,36 @@ fun HomeScreen(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
             }
         }
+        
+        // Loading overlay while song is being prepared
+        if (uiState.isPlayLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator(color = SpotifyGreen)
+                    Text(
+                        text = "Loading song...",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+        
+        // Error Snackbar
+        androidx.compose.material3.SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (playbackState.currentTrack != null) 80.dp else 16.dp)
+        )
         
         // Mini Player
         AnimatedVisibility(
