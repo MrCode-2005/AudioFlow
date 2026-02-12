@@ -1,5 +1,8 @@
 package com.audioflow.player.ui.library
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -34,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.audioflow.player.model.Track
+import com.audioflow.player.ui.components.MiniPlayer
 import com.audioflow.player.ui.components.TrackListItem
 import com.audioflow.player.ui.theme.*
 
@@ -270,6 +274,22 @@ fun PlaylistDetailScreen(
                 }
             }
         }
+        
+        // Mini Player
+        AnimatedVisibility(
+            visible = playbackState.currentTrack != null,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it }
+        ) {
+            MiniPlayer(
+                playbackState = playbackState,
+                onPlayPauseClick = { viewModel.togglePlayPause() },
+                onNextClick = { viewModel.playNext() },
+                onClick = onNavigateToPlayer,
+                modifier = Modifier.padding(bottom = 0.dp)
+            )
+        }
     }
     
     // Edit Playlist Dialog
@@ -327,7 +347,7 @@ fun PlaylistDetailScreen(
             }
         )
     }
-}
+    }
 
 @Composable
 private fun PlaylistTrackItem(

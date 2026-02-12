@@ -133,6 +133,14 @@ class PlaylistDetailViewModel @Inject constructor(
         playlistManager.deletePlaylist(playlistId)
     }
     
+    fun togglePlayPause() {
+        playerController.togglePlayPause()
+    }
+    
+    fun playNext() {
+        playerController.next()
+    }
+    
     // Add a track to this playlist
     fun addTrack(track: Track) {
         playlistManager.addToPlaylist(playlistId, track.id)
