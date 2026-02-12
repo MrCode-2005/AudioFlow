@@ -77,7 +77,8 @@ class SearchViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val playerController: PlayerController,
     private val searchHistoryManager: SearchHistoryManager,
-    private val recentlyPlayedManager: RecentlyPlayedManager
+    private val recentlyPlayedManager: RecentlyPlayedManager,
+    val filterPreferences: com.audioflow.player.data.local.FilterPreferences
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(SearchUiState())
@@ -279,10 +280,12 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isYouTubeLoading = true)
             
-            // Use natural query without modifications to match YouTube's native behavior
-            Log.d(TAG, "Searching YouTube with query: $query")
+            // Augment query with language/genre filter suffix
+            val filterSuffix = filterPreferences.getFilterSuffix()
+            val augmentedQuery = if (filterSuffix.isNotBlank()) "$query $filterSuffix" else query
+            Log.d(TAG, "Searching YouTube with query: $augmentedQuery (original: $query)")
             
-            mediaRepository.searchYouTube(query)
+            mediaRepository.searchYouTube(augmentedQuery)
                 .onSuccess { results ->
                     // Save to search history on successful search
                     searchHistoryManager.addSearch(query)
