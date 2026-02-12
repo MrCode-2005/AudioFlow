@@ -48,6 +48,8 @@ data class HomeUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val isDynamicMode: Boolean = true, // Discover is default
+    val isPlayLoading: Boolean = false, // Loading state for song extraction
+    val playError: String? = null, // Playback-specific error message
     
     // Recommendations
     val trendingSongs: List<YouTubeSearchResult> = emptyList(),
@@ -61,7 +63,8 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val playerController: PlayerController,
-    private val recentlyPlayedManager: RecentlyPlayedManager
+    private val recentlyPlayedManager: RecentlyPlayedManager,
+    val filterPreferences: com.audioflow.player.data.local.FilterPreferences
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -134,13 +137,18 @@ class HomeViewModel @Inject constructor(
     }
     
     private suspend fun loadTrendingSongs() {
-        mediaRepository.searchYouTube("trending songs 2024 -mix -compilation -hour")
+        val suffix = filterPreferences.getFilterSuffix()
+        val baseQuery = "trending songs 2024 -mix -compilation -hour"
+        val query = if (suffix.isNotBlank()) "$baseQuery $suffix" else baseQuery
+        mediaRepository.searchYouTube(query)
             .onSuccess { results ->
+                // Filter out long videos (mixes/compilations) — keep only 1-10 min songs
+                val filteredResults = results.filter { it.duration in 30_000..600_000 }
                 _uiState.value = _uiState.value.copy(
-                    trendingSongs = results.take(10),
+                    trendingSongs = filteredResults.take(10),
                     isTrendingLoading = false
                 )
-                Log.d("HomeViewModel", "Loaded ${results.size} trending songs")
+                Log.d("HomeViewModel", "Loaded ${filteredResults.size} trending songs (filtered from ${results.size})")
             }
             .onFailure { error ->
                 Log.e("HomeViewModel", "Failed to load trending: ${error.message}")
@@ -163,7 +171,9 @@ class HomeViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(genreCategories = updatedCategories)
         
         viewModelScope.launch {
-            mediaRepository.searchYouTube(category.query)
+            val suffix = filterPreferences.getFilterSuffix()
+            val augQuery = if (suffix.isNotBlank()) "${category.query} $suffix" else category.query
+            mediaRepository.searchYouTube(augQuery)
                 .onSuccess { results ->
                     val categories = _uiState.value.genreCategories.toMutableList()
                     categories[index] = category.copy(
@@ -207,16 +217,18 @@ class HomeViewModel @Inject constructor(
                     else -> "popular music 2024 -mix -compilation"
                 }
                 
-                mediaRepository.searchYouTube(query)
+                val augQuery = if (filterPreferences.getFilterSuffix().isNotBlank()) "$query ${filterPreferences.getFilterSuffix()}" else query
+                mediaRepository.searchYouTube(augQuery)
                     .fold(
                         onSuccess = { results ->
-                            // Use first song's thumbnail as playlist cover
-                            val coverUrl = results.firstOrNull()?.thumbnailUrl ?: ""
+                            // Filter out long videos + use first song's thumbnail as playlist cover
+                            val filteredResults = results.filter { it.duration in 30_000..600_000 }
+                            val coverUrl = filteredResults.firstOrNull()?.thumbnailUrl ?: ""
                             TrendingPlaylist(
                                 id = id,
                                 name = name,
                                 description = desc,
-                                songs = results.take(15),
+                                songs = filteredResults.take(15),
                                 coverImageUrl = coverUrl
                             )
                         },
@@ -239,22 +251,89 @@ class HomeViewModel @Inject constructor(
      * Play a YouTube search result from recommendations
      */
     fun playYouTubeResult(result: YouTubeSearchResult, queue: List<YouTubeSearchResult> = emptyList()) {
+        // Validate input
+        if (result.videoId.isBlank()) {
+            _uiState.value = _uiState.value.copy(playError = "Invalid song. Please try another.")
+            return
+        }
+        
         val index = queue.indexOf(result).takeIf { it >= 0 } ?: 0
         val queueToUse = queue.ifEmpty { listOf(result) }
         
         playerController.setYouTubeQueue(queueToUse, index)
         
+        // Show loading state while extracting stream
+        _uiState.value = _uiState.value.copy(isPlayLoading = true, playError = null)
+        
         // Extract and play
         viewModelScope.launch {
-            mediaRepository.getYouTubeStreamUrl(result.videoId)
-                .onSuccess { streamInfo ->
-                    val track = mediaRepository.createTrackFromYouTube(streamInfo)
-                    playerController.play(track)
-                }
-                .onFailure { error ->
-                    Log.e("HomeViewModel", "Failed to play: ${error.message}")
-                }
+            try {
+                mediaRepository.getYouTubeStreamUrl(result.videoId)
+                    .onSuccess { streamInfo ->
+                        val track = mediaRepository.createTrackFromYouTube(streamInfo)
+                        playerController.play(track)
+                        _uiState.value = _uiState.value.copy(isPlayLoading = false)
+                    }
+                    .onFailure { error ->
+                        Log.e("HomeViewModel", "Failed to play: ${error.message}")
+                        _uiState.value = _uiState.value.copy(
+                            isPlayLoading = false,
+                            playError = "Couldn't play \"${result.title}\". ${error.message ?: "Try another song."}"
+                        )
+                    }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Crash prevented in playYouTubeResult: ${e.message}", e)
+                _uiState.value = _uiState.value.copy(
+                    isPlayLoading = false,
+                    playError = "Something went wrong. Please try again."
+                )
+            }
         }
+    }
+    
+    /**
+     * Play a recently played song
+     */
+    fun playRecentSong(song: RecentlyPlayedSong) {
+        if (song.id.startsWith("yt_")) {
+            // YouTube song — extract video ID and play
+            val videoId = song.id.removePrefix("yt_")
+            val ytResult = YouTubeSearchResult(
+                videoId = videoId,
+                title = song.title,
+                artist = song.artist,
+                thumbnailUrl = song.thumbnailUri ?: "",
+                duration = song.duration
+            )
+            playYouTubeResult(ytResult)
+        } else {
+            // Local track — find and play
+            viewModelScope.launch {
+                val allTracks = _uiState.value.allTracks
+                val track = allTracks.find { it.id == song.id }
+                if (track != null) {
+                    playerController.play(track)
+                } else {
+                    // Reload and try again
+                    val refreshedTracks = mediaRepository.getAllTracks()
+                    val found = refreshedTracks.find { it.id == song.id }
+                    if (found != null) {
+                        playerController.play(found)
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            playError = "Song not found. It may have been removed."
+                        )
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Clear the play error message
+     */
+    fun clearPlayError() {
+        _uiState.value = _uiState.value.copy(playError = null)
     }
     
     /**
