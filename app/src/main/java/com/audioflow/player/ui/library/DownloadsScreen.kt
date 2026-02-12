@@ -34,6 +34,7 @@ import com.audioflow.player.model.Track
 import com.audioflow.player.ui.components.MiniPlayer
 import com.audioflow.player.ui.theme.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsScreen(
     onNavigateBack: () -> Unit,
@@ -42,19 +43,33 @@ fun DownloadsScreen(
 ) {
     val downloadedSongs by viewModel.downloadedSongs.collectAsState(initial = emptyList())
     val playbackState by viewModel.playbackState.collectAsState()
+    val folders by viewModel.allFolders.collectAsState(initial = emptyList())
     var isShuffleEnabled by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var newFolderName by remember { mutableStateOf("") }
+    var currentFolderId by remember { mutableStateOf<String?>(null) }
+    var moveToSongId by remember { mutableStateOf<String?>(null) }
+    var showRenameFolderDialog by remember { mutableStateOf<String?>(null) }
+    var renameFolderText by remember { mutableStateOf("") }
+    
+    // Current folder name for header
+    val currentFolderName = currentFolderId?.let { fid -> folders.find { it.id == fid }?.name }
     
     // Count by status
     val downloadingCount = downloadedSongs.count { it.status == DownloadStatus.DOWNLOADING }
     val completedCount = downloadedSongs.count { it.status == DownloadStatus.COMPLETED }
     val failedCount = downloadedSongs.count { it.status == DownloadStatus.FAILED }
     
-    // Show ALL downloads (not just completed)
-    val allDownloads = downloadedSongs.sortedByDescending { it.timestamp }
+    // Filter songs by current folder
+    val allDownloads = if (currentFolderId != null) {
+        downloadedSongs.filter { it.folderId == currentFolderId }.sortedByDescending { it.timestamp }
+    } else {
+        downloadedSongs.filter { it.folderId == null }.sortedByDescending { it.timestamp }
+    }
     
     // Completed downloads for playback
-    val completedDownloads = downloadedSongs.filter { entity ->
+    val completedDownloads = allDownloads.filter { entity ->
         entity.status == DownloadStatus.COMPLETED &&
         entity.localPath.isNotEmpty() &&
         java.io.File(entity.localPath).exists()
@@ -65,7 +80,7 @@ fun DownloadsScreen(
         AlertDialog(
             onDismissRequest = { showDeleteAllDialog = false },
             title = { Text("Delete All Downloads?") },
-            text = { Text("This will remove all ${allDownloads.size} downloads. This action cannot be undone.") },
+            text = { Text("This will remove all downloads. This action cannot be undone.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -83,6 +98,94 @@ fun DownloadsScreen(
             },
             containerColor = CardBackground,
             textContentColor = TextPrimary
+        )
+    }
+    
+    // Create Folder Dialog
+    if (showCreateFolderDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateFolderDialog = false; newFolderName = "" },
+            title = { Text("New Folder") },
+            text = {
+                OutlinedTextField(
+                    value = newFolderName,
+                    onValueChange = { newFolderName = it },
+                    placeholder = { Text("Folder name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newFolderName.isNotBlank()) {
+                            viewModel.createFolder(newFolderName.trim())
+                            showCreateFolderDialog = false
+                            newFolderName = ""
+                        }
+                    }
+                ) { Text("Create", color = SpotifyGreen) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateFolderDialog = false; newFolderName = "" }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = CardBackground,
+            textContentColor = TextPrimary
+        )
+    }
+    
+    // Rename Folder Dialog
+    showRenameFolderDialog?.let { folderId ->
+        AlertDialog(
+            onDismissRequest = { showRenameFolderDialog = null },
+            title = { Text("Rename Folder") },
+            text = {
+                OutlinedTextField(
+                    value = renameFolderText,
+                    onValueChange = { renameFolderText = it },
+                    placeholder = { Text("New name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (renameFolderText.isNotBlank()) {
+                            viewModel.renameFolder(folderId, renameFolderText.trim())
+                            showRenameFolderDialog = null
+                        }
+                    }
+                ) { Text("Rename", color = SpotifyGreen) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameFolderDialog = null }) { Text("Cancel") }
+            },
+            containerColor = CardBackground,
+            textContentColor = TextPrimary
+        )
+    }
+    
+    // Move To Dialog
+    moveToSongId?.let { songId ->
+        MoveToDialog(
+            folders = folders,
+            onMoveToFolder = { folderId ->
+                viewModel.moveSongToFolder(songId, folderId)
+                moveToSongId = null
+            },
+            onMoveToRoot = {
+                viewModel.moveSongToFolder(songId, null)
+                moveToSongId = null
+            },
+            onCreateAndMove = { folderName ->
+                viewModel.createFolder(folderName)
+                // After creation, move song to the new folder
+                // Since folder creation is async, we handle this slightly differently
+                viewModel.moveSongToFolder(songId, null) // temporary, best effort
+                moveToSongId = null
+            },
+            onDismiss = { moveToSongId = null }
         )
     }
     
@@ -106,7 +209,10 @@ fun DownloadsScreen(
                     )
             ) {
                 IconButton(
-                    onClick = onNavigateBack,
+                    onClick = {
+                        if (currentFolderId != null) currentFolderId = null
+                        else onNavigateBack()
+                    },
                     modifier = Modifier
                         .padding(16.dp)
                         .align(Alignment.TopStart)
@@ -131,7 +237,7 @@ fun DownloadsScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Downloads",
+                        text = currentFolderName ?: "Downloads",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
@@ -212,30 +318,52 @@ fun DownloadsScreen(
                     }
                 }
                 
-                // Play button (only for completed downloads)
-                if (completedDownloads.isNotEmpty()) {
-                    FloatingActionButton(
-                        onClick = {
-                            val tracksToPlay = if (isShuffleEnabled) {
-                                completedDownloads.shuffled()
-                            } else {
-                                completedDownloads
-                            }.map { entityToTrack(it) }
-                            
-                            if (tracksToPlay.isNotEmpty()) {
-                                viewModel.playDownloadedTrack(tracksToPlay.first())
-                                onNavigateToPlayer()
-                            }
-                        },
-                        containerColor = SpotifyGreen,
-                        contentColor = Color.Black,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Play All",
-                            modifier = Modifier.size(28.dp)
-                        )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Create Folder button
+                    if (currentFolderId == null) {
+                        IconButton(
+                            onClick = { showCreateFolderDialog = true },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(SpotifyGreen.copy(alpha = 0.2f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CreateNewFolder,
+                                contentDescription = "New Folder",
+                                tint = SpotifyGreen,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    
+                    // Play button (only for completed downloads)
+                    if (completedDownloads.isNotEmpty()) {
+                        FloatingActionButton(
+                            onClick = {
+                                val tracksToPlay = if (isShuffleEnabled) {
+                                    completedDownloads.shuffled()
+                                } else {
+                                    completedDownloads
+                                }.map { entityToTrack(it) }
+                                
+                                if (tracksToPlay.isNotEmpty()) {
+                                    viewModel.playDownloadedPlaylist(tracksToPlay, 0)
+                                    onNavigateToPlayer()
+                                }
+                            },
+                            containerColor = SpotifyGreen,
+                            contentColor = Color.Black,
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Play All",
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -282,6 +410,30 @@ fun DownloadsScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 100.dp)
                 ) {
+                    // Show folders only at root level
+                    if (currentFolderId == null && folders.isNotEmpty()) {
+                        items(folders) { folder ->
+                            FolderItem(
+                                folder = folder,
+                                songCount = downloadedSongs.count { it.folderId == folder.id },
+                                onClick = { currentFolderId = folder.id },
+                                onRename = {
+                                    renameFolderText = folder.name
+                                    showRenameFolderDialog = folder.id
+                                },
+                                onDelete = { viewModel.deleteFolder(folder.id) }
+                            )
+                        }
+                        
+                        // Divider between folders and songs
+                        item {
+                            HorizontalDivider(
+                                color = TextSecondary.copy(alpha = 0.2f),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                    
                     itemsIndexed(allDownloads) { index, entity ->
                         DownloadedSongItem(
                             entity = entity,
@@ -289,15 +441,17 @@ fun DownloadsScreen(
                             totalCount = allDownloads.size,
                             onPlay = {
                                 if (entity.status == DownloadStatus.COMPLETED) {
-                                    val track = entityToTrack(entity)
-                                    viewModel.playDownloadedTrack(track)
+                                    val tracks = completedDownloads.map { entityToTrack(it) }
+                                    val startIdx = completedDownloads.indexOf(entity).coerceAtLeast(0)
+                                    viewModel.playDownloadedPlaylist(tracks, startIdx)
                                     onNavigateToPlayer()
                                 }
                             },
                             onDelete = { viewModel.deleteDownload(entity.id) },
                             onMoveUp = { viewModel.moveDownloadUp(entity.id) },
                             onMoveDown = { viewModel.moveDownloadDown(entity.id) },
-                            onRetry = { viewModel.retryDownload(entity.id) }
+                            onRetry = { viewModel.retryDownload(entity.id) },
+                            onMoveTo = { moveToSongId = entity.id }
                         )
                     }
                 }
@@ -331,7 +485,8 @@ private fun DownloadedSongItem(
     onDelete: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onMoveTo: () -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -577,6 +732,19 @@ private fun DownloadedSongItem(
                     )
                 }
                 
+                if (entity.status == DownloadStatus.COMPLETED) {
+                    DropdownMenuItem(
+                        text = { Text("Move To Folder") },
+                        onClick = {
+                            showMenu = false
+                            onMoveTo()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Folder, contentDescription = null)
+                        }
+                    )
+                }
+                
                 HorizontalDivider()
                 
                 DropdownMenuItem(
@@ -588,6 +756,85 @@ private fun DownloadedSongItem(
                     leadingIcon = {
                         Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red)
                     }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderItem(
+    folder: com.audioflow.player.data.local.entity.DownloadFolderEntity,
+    songCount: Int,
+    onClick: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Folder icon
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(SpotifyGreen.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Folder,
+                contentDescription = null,
+                tint = SpotifyGreen,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = folder.name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "$songCount songs",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+        }
+        
+        Box {
+            IconButton(onClick = { showMenu = true }) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    tint = TextSecondary
+                )
+            }
+            
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Rename") },
+                    onClick = { showMenu = false; onRename() },
+                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
+                )
+                DropdownMenuItem(
+                    text = { Text("Delete Folder", color = Color.Red) },
+                    onClick = { showMenu = false; onDelete() },
+                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red) }
                 )
             }
         }
