@@ -47,6 +47,8 @@ fun SearchScreen(
     val searchHistory by viewModel.searchHistory.collectAsState()
     val recentlyPlayedSongs by viewModel.recentlyPlayedSongs.collectAsState()
     val focusManager = LocalFocusManager.current
+    var showFilterSheet by remember { mutableStateOf(false) }
+    val hasActiveFilters = viewModel.filterPreferences.hasActiveFilters()
     
     // Auto-search if initialQuery is provided (e.g., from Go to Artist/Album)
     LaunchedEffect(initialQuery) {
@@ -72,13 +74,35 @@ fun SearchScreen(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Search Header
-            Text(
-                text = "Search",
-                style = MaterialTheme.typography.headlineLarge,
-                color = TextPrimary,
-                modifier = Modifier.padding(16.dp)
-            )
+            // Search Header with Filter button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Search",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = TextPrimary
+                )
+                IconButton(onClick = { showFilterSheet = true }) {
+                    BadgedBox(
+                        badge = {
+                            if (hasActiveFilters) {
+                                Badge(containerColor = SpotifyGreen) { }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FilterList,
+                            contentDescription = "Filters",
+                            tint = if (hasActiveFilters) SpotifyGreen else TextSecondary
+                        )
+                    }
+                }
+            }
             
             // Search Mode Toggle
             SearchModeToggle(
@@ -259,6 +283,14 @@ fun SearchScreen(
                 modifier = Modifier.padding(bottom = 0.dp)
             )
         }
+    }
+    
+    // Filter Bottom Sheet
+    if (showFilterSheet) {
+        FilterSheet(
+            filterPreferences = viewModel.filterPreferences,
+            onDismiss = { showFilterSheet = false }
+        )
     }
 }
 
