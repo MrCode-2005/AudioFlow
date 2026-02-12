@@ -53,6 +53,9 @@ class PlayerController @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
     
+    private val _isBuffering = MutableStateFlow(false)
+    val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
+    
     private var currentQueue: List<Track> = emptyList()
     private var isControllerReady = false
     
@@ -299,13 +302,32 @@ class PlayerController @Inject constructor(
                     else -> "UNKNOWN"
                 }
                 Log.d(TAG, "Playback state changed: $stateName")
+                _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
                 updatePlaybackState()
             }
             
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "Player error: ${error.message}")
                 Log.e(TAG, "Error code: ${error.errorCode}")
-                _error.value = error.message ?: "Playback error"
+                _error.value = when (error.errorCode) {
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+                        "Network error. Check your connection and try again."
+                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
+                        "Stream unavailable. Please try another song."
+                    PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+                    PlaybackException.ERROR_CODE_DECODING_FAILED ->
+                        "Unable to decode audio. Trying next song..."
+                    else -> error.message ?: "Playback error occurred"
+                }
+                // Don't crash — try to auto-advance to next song on decoder errors
+                if (error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED) {
+                    scope.launch {
+                        kotlinx.coroutines.delay(500)
+                        next()
+                    }
+                }
             }
             
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -333,26 +355,38 @@ class PlayerController @Inject constructor(
         val controller = mediaController ?: return
         val currentIndex = controller.currentMediaItemIndex
         
-        _playbackState.value = PlaybackState(
-            isPlaying = controller.isPlaying,
-            currentTrack = if (currentIndex >= 0 && currentIndex < currentQueue.size) {
-                currentQueue[currentIndex]
-            } else null,
-            currentPosition = controller.currentPosition,
-            duration = controller.duration.takeIf { it > 0 } ?: 0,
-            shuffleEnabled = controller.shuffleModeEnabled,
-            repeatMode = when (controller.repeatMode) {
-                Player.REPEAT_MODE_ONE -> RepeatMode.ONE
-                Player.REPEAT_MODE_ALL -> RepeatMode.ALL
-                else -> RepeatMode.OFF
-            },
-            // Use full YouTube queue tracks for carousel display (shows prev/next album art)
-            queue = if (youTubeQueueTracks.isNotEmpty()) youTubeQueueTracks else currentQueue,
-            currentQueueIndex = if (youTubeQueueTracks.isNotEmpty()) youTubeQueueIndex else currentIndex
-        )
+        try {
+            _playbackState.value = PlaybackState(
+                isPlaying = controller.isPlaying,
+                currentTrack = if (currentIndex >= 0 && currentIndex < currentQueue.size) {
+                    currentQueue[currentIndex]
+                } else if (currentQueue.isNotEmpty()) {
+                    currentQueue[0] // Fallback to first track
+                } else null,
+                currentPosition = controller.currentPosition.coerceAtLeast(0),
+                duration = controller.duration.takeIf { it > 0 } ?: 0,
+                shuffleEnabled = controller.shuffleModeEnabled,
+                repeatMode = when (controller.repeatMode) {
+                    Player.REPEAT_MODE_ONE -> RepeatMode.ONE
+                    Player.REPEAT_MODE_ALL -> RepeatMode.ALL
+                    else -> RepeatMode.OFF
+                },
+                // Use full YouTube queue tracks for carousel display (shows prev/next album art)
+                queue = if (youTubeQueueTracks.isNotEmpty()) youTubeQueueTracks else currentQueue,
+                currentQueueIndex = if (youTubeQueueTracks.isNotEmpty()) youTubeQueueIndex.coerceAtLeast(0) else currentIndex
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating playback state: ${e.message}")
+        }
     }
     
     fun play(track: Track) {
+        // Validate track before playing
+        if (track.title.isBlank() || track.contentUri.toString().isBlank()) {
+            Log.e(TAG, "play() called with invalid track: title='${track.title}', uri='${track.contentUri}'")
+            _error.value = "Cannot play: invalid track data"
+            return
+        }
         Log.d(TAG, "play() called for: ${track.title}")
         Log.d(TAG, "Track URI: ${track.contentUri}")
         setQueue(listOf(track), 0)
