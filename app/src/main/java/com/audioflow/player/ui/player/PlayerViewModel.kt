@@ -33,6 +33,7 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
     
     val playbackState = playerController.playbackState
+    val isBuffering = playerController.isBuffering
     val likedSongIds = likedSongsManager.likedSongIds
     val playlists = playlistManager.playlists
     
