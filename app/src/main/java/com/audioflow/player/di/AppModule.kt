@@ -72,7 +72,10 @@ object AppModule {
             context,
             AppDatabase::class.java,
             "audioflow.db"
-        ).build()
+        )
+        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .fallbackToDestructiveMigration()
+        .build()
     }
 
     @Provides
@@ -85,5 +88,11 @@ object AppModule {
     @Singleton
     fun provideDownloadedSongDao(database: AppDatabase): DownloadedSongDao {
         return database.downloadedSongDao()
+    }
+    
+    @Provides
+    @Singleton
+    fun provideDownloadFolderDao(database: AppDatabase): com.audioflow.player.data.local.dao.DownloadFolderDao {
+        return database.downloadFolderDao()
     }
 }

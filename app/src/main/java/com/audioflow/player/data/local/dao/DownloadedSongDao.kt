@@ -32,4 +32,16 @@ interface DownloadedSongDao {
     
     @Query("UPDATE downloaded_songs SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: String, status: String) // Using String for enum for simplicity via TypeConverter
+    
+    @Query("UPDATE downloaded_songs SET folderId = :folderId WHERE id = :id")
+    suspend fun updateFolderId(id: String, folderId: String?)
+    
+    @Query("SELECT * FROM downloaded_songs WHERE folderId = :folderId ORDER BY timestamp DESC")
+    fun getSongsByFolder(folderId: String): Flow<List<DownloadedSongEntity>>
+    
+    @Query("SELECT * FROM downloaded_songs WHERE folderId IS NULL ORDER BY timestamp DESC")
+    fun getUnfolderedSongs(): Flow<List<DownloadedSongEntity>>
+    
+    @Query("SELECT COUNT(*) FROM downloaded_songs WHERE folderId = :folderId")
+    suspend fun getSongCountInFolder(folderId: String): Int
 }

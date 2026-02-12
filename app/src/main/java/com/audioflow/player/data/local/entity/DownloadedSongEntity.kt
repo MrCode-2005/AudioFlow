@@ -14,7 +14,8 @@ data class DownloadedSongEntity(
     val duration: Long,
     val localPath: String,
     val status: DownloadStatus = DownloadStatus.COMPLETED,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val folderId: String? = null
 )
 
 enum class DownloadStatus {
