@@ -53,6 +53,7 @@ fun NowPlayingScreen(
     viewModel: PlayerViewModel = hiltViewModel()
 ) {
     val playbackState by viewModel.playbackState.collectAsState()
+    val isBuffering by viewModel.isBuffering.collectAsState()
     val likedSongIds by viewModel.likedSongIds.collectAsState()
     val showPlaylistSheet by viewModel.showPlaylistSheet.collectAsState()
     val showNewPlaylistDialog by viewModel.showNewPlaylistDialog.collectAsState()
@@ -442,19 +443,32 @@ fun NowPlayingScreen(
                         )
                     }
                     
-                    // Play/Pause (white circle)
-                    IconButton(
-                        onClick = { viewModel.togglePlayPause() },
-                        modifier = Modifier
-                            .size(64.dp)
-                            .background(TextPrimary, CircleShape)
+                    // Play/Pause (white circle) — shows spinner when buffering
+                    Box(
+                        modifier = Modifier.size(64.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
-                            tint = SpotifyBlack,
-                            modifier = Modifier.size(36.dp)
-                        )
+                        IconButton(
+                            onClick = { viewModel.togglePlayPause() },
+                            modifier = Modifier
+                                .size(64.dp)
+                                .background(TextPrimary, CircleShape)
+                        ) {
+                            if (isBuffering) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = SpotifyBlack,
+                                    strokeWidth = 3.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                                    tint = SpotifyBlack,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                        }
                     }
                     
                     // Next
