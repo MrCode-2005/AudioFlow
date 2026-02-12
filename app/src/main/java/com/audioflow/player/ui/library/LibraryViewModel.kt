@@ -222,10 +222,47 @@ class LibraryViewModel @Inject constructor(
         playerController.play(track)
     }
     
+    // Play downloaded tracks as a playlist (enables next/prev/auto-advance)
+    fun playDownloadedPlaylist(tracks: List<Track>, startIndex: Int = 0) {
+        if (tracks.isEmpty()) return
+        val safeIndex = startIndex.coerceIn(0, tracks.size - 1)
+        playerController.clearYouTubeQueue()
+        playerController.setQueue(tracks, safeIndex)
+    }
+    
     // Retry a failed download
     fun retryDownload(trackId: String) {
         viewModelScope.launch {
             downloadRepository.retryDownload(trackId)
         }
     }
+    
+    // ========== Folder Management ==========
+    val allFolders = downloadRepository.allFolders
+    
+    fun createFolder(name: String) {
+        viewModelScope.launch {
+            downloadRepository.createFolder(name)
+        }
+    }
+    
+    fun renameFolder(folderId: String, newName: String) {
+        viewModelScope.launch {
+            downloadRepository.renameFolder(folderId, newName)
+        }
+    }
+    
+    fun deleteFolder(folderId: String) {
+        viewModelScope.launch {
+            downloadRepository.deleteFolder(folderId)
+        }
+    }
+    
+    fun moveSongToFolder(songId: String, folderId: String?) {
+        viewModelScope.launch {
+            downloadRepository.moveSongToFolder(songId, folderId)
+        }
+    }
+    
+    fun getSongsByFolder(folderId: String) = downloadRepository.getSongsByFolder(folderId)
 }
