@@ -21,9 +21,11 @@ import javax.inject.Singleton
 @Singleton
 class DownloadRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val downloadedSongDao: DownloadedSongDao
+    private val downloadedSongDao: DownloadedSongDao,
+    private val downloadFolderDao: com.audioflow.player.data.local.dao.DownloadFolderDao
 ) {
     val allDownloads: Flow<List<DownloadedSongEntity>> = downloadedSongDao.getAllDownloadedSongs()
+    val allFolders: Flow<List<com.audioflow.player.data.local.entity.DownloadFolderEntity>> = downloadFolderDao.getAllFolders()
 
     suspend fun isDownloaded(trackId: String): Boolean {
         return downloadedSongDao.isDownloaded(trackId)
@@ -197,4 +199,42 @@ class DownloadRepository @Inject constructor(
             request
         )
     }
+    
+    // ========== Folder Management ==========
+    
+    suspend fun createFolder(name: String): String {
+        val folder = com.audioflow.player.data.local.entity.DownloadFolderEntity(name = name)
+        downloadFolderDao.insert(folder)
+        return folder.id
+    }
+    
+    suspend fun renameFolder(folderId: String, newName: String) {
+        downloadFolderDao.rename(folderId, newName)
+    }
+    
+    suspend fun deleteFolder(folderId: String) {
+        // Move songs back to root (unfolder them)
+        val songs = downloadedSongDao.getAllDownloadedSongsSync()
+        songs.filter { it.folderId == folderId }.forEach {
+            downloadedSongDao.updateFolderId(it.id, null)
+        }
+        downloadFolderDao.delete(folderId)
+    }
+    
+    suspend fun moveSongToFolder(songId: String, folderId: String?) {
+        downloadedSongDao.updateFolderId(songId, folderId)
+    }
+    
+    fun getSongsByFolder(folderId: String): Flow<List<DownloadedSongEntity>> {
+        return downloadedSongDao.getSongsByFolder(folderId)
+    }
+    
+    fun getUnfolderedSongs(): Flow<List<DownloadedSongEntity>> {
+        return downloadedSongDao.getUnfolderedSongs()
+    }
+    
+    suspend fun getSongCountInFolder(folderId: String): Int {
+        return downloadedSongDao.getSongCountInFolder(folderId)
+    }
 }
+
