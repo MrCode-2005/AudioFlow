@@ -1,6 +1,9 @@
 package com.audioflow.player.ui.player
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -15,6 +18,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,6 +54,11 @@ fun LyricsScreen(
 ) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    
+    // Swipe-down dismiss state
+    val dragOffset = remember { Animatable(0f) }
+    val dismissThresholdPx = with(density) { 150.dp.toPx() }
     
     // Calculate current line index from synced lyrics
     val currentLineIndex = remember(lyrics, currentPosition) {
@@ -71,6 +82,48 @@ fun LyricsScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer {
+                translationY = dragOffset.value
+                // Scale down slightly as you drag for a polished feel
+                val progress = (dragOffset.value / dismissThresholdPx).coerceIn(0f, 1f)
+                scaleX = 1f - (progress * 0.05f)
+                scaleY = 1f - (progress * 0.05f)
+                alpha = 1f - (progress * 0.3f)
+            }
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragEnd = {
+                        coroutineScope.launch {
+                            if (dragOffset.value > dismissThresholdPx) {
+                                // Animate offscreen and dismiss
+                                dragOffset.animateTo(
+                                    targetValue = size.height.toFloat(),
+                                    animationSpec = tween(200)
+                                )
+                                onNavigateBack()
+                            } else {
+                                // Snap back
+                                dragOffset.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = tween(200)
+                                )
+                            }
+                        }
+                    },
+                    onDragCancel = {
+                        coroutineScope.launch {
+                            dragOffset.animateTo(0f, tween(200))
+                        }
+                    },
+                    onVerticalDrag = { _, dragAmount ->
+                        coroutineScope.launch {
+                            // Only allow dragging downward
+                            val newOffset = (dragOffset.value + dragAmount).coerceAtLeast(0f)
+                            dragOffset.snapTo(newOffset)
+                        }
+                    }
+                )
+            }
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
