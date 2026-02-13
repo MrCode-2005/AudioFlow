@@ -192,13 +192,14 @@ fun NowPlayingScreen(
         }
     }
 
+    val isVideoActive = isVideoMode && videoStreamInfo != null
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .then(
-                // When video is playing, background is transparent (per spec Section 2, Rule 4)
-                if (isVideoMode && videoStreamInfo != null) {
-                    Modifier.background(Color.Transparent)
+                if (isVideoActive) {
+                    Modifier.background(Color.Black)
                 } else {
                     Modifier.background(
                         Brush.verticalGradient(
@@ -217,7 +218,6 @@ fun NowPlayingScreen(
                 detectVerticalDragGestures(
                     onDragStart = { totalDragAmount = 0f },
                     onDragEnd = {
-                        // Trigger navigation if dragged down enough (50dp threshold)
                         if (totalDragAmount > 50f) {
                             onNavigateBack()
                         }
@@ -226,13 +226,42 @@ fun NowPlayingScreen(
                     onDragCancel = { totalDragAmount = 0f },
                     onVerticalDrag = { change, dragAmount ->
                         change.consume()
-                        if (dragAmount > 0) { // Only track downward drag
+                        if (dragAmount > 0) {
                             totalDragAmount += dragAmount
                         }
                     }
                 )
             }
     ) {
+        // ===== VIDEO BACKGROUND LAYER (behind everything) =====
+        if (isVideoActive) {
+            VideoPlayerView(
+                videoUrl = videoStreamInfo!!.videoStreamUrl,
+                currentPosition = playbackState.currentPosition,
+                isPlaying = playbackState.isPlaying,
+                modifier = Modifier.fillMaxSize()
+            )
+            
+            // Dark gradient scrim so controls are readable over video
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.3f),
+                                Color.Black.copy(alpha = 0.7f),
+                                Color.Black.copy(alpha = 0.85f)
+                            ),
+                            startY = 0f,
+                            endY = Float.POSITIVE_INFINITY
+                        )
+                    )
+            )
+        }
+        
+        // ===== CONTROLS LAYER (on top of video) =====
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -265,7 +294,7 @@ fun NowPlayingScreen(
                 }
             }
             
-            Spacer(modifier = Modifier.height(8.dp)) // Reduced to give more space to album art
+            Spacer(modifier = Modifier.height(8.dp))
             
             // Get previous and next track artwork
             val queue = playbackState.queue
@@ -274,50 +303,44 @@ fun NowPlayingScreen(
             val nextTrack = if (currentIndex < queue.size - 1) queue.getOrNull(currentIndex + 1) else null
             
             // CAROUSEL-STYLE ALBUM ART SECTION
-            // Uses HorizontalPager for smooth swiping and preloading
             val pagerState = androidx.compose.foundation.pager.rememberPagerState(
                 initialPage = playbackState.currentQueueIndex,
                 pageCount = { playbackState.queue.size.coerceAtLeast(1) }
             )
             
-            // Sync pager with playback state (when track changes externally)
+            // Sync pager with playback state
             LaunchedEffect(playbackState.currentQueueIndex) {
                 if (pagerState.currentPage != playbackState.currentQueueIndex) {
                     pagerState.scrollToPage(playbackState.currentQueueIndex)
                 }
             }
             
-            // Sync playback with pager (when user swipes)
+            // Sync playback with pager
             LaunchedEffect(pagerState.currentPage) {
                 if (pagerState.currentPage != playbackState.currentQueueIndex && !pagerState.isScrollInProgress) {
-                    val targetIndex = pagerState.currentPage
-                    if (targetIndex < playbackState.currentQueueIndex) {
-                        viewModel.seekToQueueIndex(targetIndex)
-                    } else if (targetIndex > playbackState.currentQueueIndex) {
-                        viewModel.seekToQueueIndex(targetIndex)
-                    }
+                    viewModel.seekToQueueIndex(pagerState.currentPage)
                 }
             }
             
-            // Handle swipe actions to trigger playback change
+            // Handle swipe settle
             LaunchedEffect(pagerState.isScrollInProgress) {
                 if (!pagerState.isScrollInProgress) {
-                    // When scroll settles, ensure we're playing the centered song
                     if (pagerState.currentPage != playbackState.currentQueueIndex) {
                         viewModel.seekToQueueIndex(pagerState.currentPage)
                     }
                 }
             }
 
+            // ===== ALBUM ART / EMPTY SPACE FOR VIDEO =====
             Box(
                 modifier = Modifier
-                    .weight(1f) // Fill available vertical space
+                    .weight(1f)
                     .fillMaxWidth()
                     .pointerInput(Unit) {
                         detectVerticalDragGestures(
                             onDragStart = { accumulatedDragY = 0f },
                             onDragEnd = {
-                                if (accumulatedDragY > 150) { // Threshold for dismiss
+                                if (accumulatedDragY > 150) {
                                     onNavigateBack()
                                 }
                                 accumulatedDragY = 0f
@@ -331,30 +354,12 @@ fun NowPlayingScreen(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                // ===== VIDEO MODE: Replace album art with video =====
-                if (isVideoMode && videoStreamInfo != null) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
-                            .aspectRatio(16f / 9f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        VideoPlayerView(
-                            videoUrl = videoStreamInfo!!.videoStreamUrl,
-                            currentPosition = playbackState.currentPosition,
-                            isPlaying = playbackState.isPlaying,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                }
-                // ===== NORMAL MODE: Album art carousel =====
-                else {
-                    val queue = playbackState.queue
+                // In video mode: empty space (video fills behind via background layer)
+                // In normal mode: album art carousel
+                if (!isVideoActive) {
+                    val queue2 = playbackState.queue
                     
-                    if (queue.isEmpty()) {
+                    if (queue2.isEmpty()) {
                          AsyncImage(
                             model = null,
                             contentDescription = "No music",
@@ -374,7 +379,7 @@ fun NowPlayingScreen(
                             pageSpacing = 12.dp,
                             beyondBoundsPageCount = 5
                         ) { page ->
-                            val track = queue.getOrNull(page)
+                            val track = queue2.getOrNull(page)
                             
                             Card(
                                 modifier = Modifier
