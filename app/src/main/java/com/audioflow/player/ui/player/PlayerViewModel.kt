@@ -1,11 +1,15 @@
 package com.audioflow.player.ui.player
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.audioflow.player.data.local.LikedSongsManager
 import com.audioflow.player.data.local.PlaylistManager
 import com.audioflow.player.data.remote.LyricsProvider
 import com.audioflow.player.data.remote.LyricsResult
+import com.audioflow.player.data.remote.YouTubeExtractor
+import com.audioflow.player.data.remote.YouTubeVideoStreamInfo
+import com.audioflow.player.model.TrackSource
 import com.audioflow.player.service.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,8 +33,13 @@ class PlayerViewModel @Inject constructor(
     private val likedSongsManager: LikedSongsManager,
     private val playlistManager: PlaylistManager,
     private val lyricsProvider: LyricsProvider,
-    private val downloadRepository: com.audioflow.player.data.repository.DownloadRepository
+    private val downloadRepository: com.audioflow.player.data.repository.DownloadRepository,
+    private val youTubeExtractor: YouTubeExtractor
 ) : ViewModel() {
+    
+    companion object {
+        private const val TAG = "PlayerViewModel"
+    }
     
     val playbackState = playerController.playbackState
     val isBuffering = playerController.isBuffering
@@ -69,6 +78,20 @@ class PlayerViewModel @Inject constructor(
     private val _lyricsEnabled = MutableStateFlow(true)
     val lyricsEnabled: StateFlow<Boolean> = _lyricsEnabled.asStateFlow()
     
+    // ==================== VIDEO STATE ====================
+    private val _isVideoMode = MutableStateFlow(false)
+    val isVideoMode: StateFlow<Boolean> = _isVideoMode.asStateFlow()
+    
+    private val _videoStreamInfo = MutableStateFlow<YouTubeVideoStreamInfo?>(null)
+    val videoStreamInfo: StateFlow<YouTubeVideoStreamInfo?> = _videoStreamInfo.asStateFlow()
+    
+    private val _isVideoLoading = MutableStateFlow(false)
+    val isVideoLoading: StateFlow<Boolean> = _isVideoLoading.asStateFlow()
+    
+    // Track which video has been prefetched to avoid redundant calls
+    private var videoPrefetchedForTrackId: String? = null
+    // ==================================================
+    
     // Navigation event for Go to Artist/Album (search query to trigger)
     private val _navigateToSearch = MutableStateFlow<String?>(null)
     val navigateToSearch: StateFlow<String?> = _navigateToSearch.asStateFlow()
@@ -88,6 +111,18 @@ class PlayerViewModel @Inject constructor(
                         fetchLyrics(track.title, track.artist ?: "Unknown", track.duration, track.id)
                         // Pre-fetch lyrics for next 2 songs in queue
                         preFetchAdjacentLyrics(state.queue, state.currentQueueIndex)
+                        
+                        // Reset video state on track change (music-first)
+                        _isVideoMode.value = false
+                        _videoStreamInfo.value = null
+                        _isVideoLoading.value = false
+                        
+                        // Lazily prefetch video for current YouTube track
+                        if (track.source == TrackSource.YOUTUBE) {
+                            prefetchVideoForCurrentTrack(track.id)
+                        } else {
+                            videoPrefetchedForTrackId = null
+                        }
                     }
                     // Check download status
                     checkDownloadStatus(track.id)
@@ -95,6 +130,83 @@ class PlayerViewModel @Inject constructor(
             }
         }
     }
+    
+    // ==================== VIDEO LOGIC ====================
+    
+    /**
+     * Prefetch video stream URL for the CURRENT track only.
+     * Runs in background, does NOT block audio or UI.
+     * Never prefetches for search results or other queue items.
+     */
+    private fun prefetchVideoForCurrentTrack(trackId: String) {
+        if (videoPrefetchedForTrackId == trackId) return
+        videoPrefetchedForTrackId = trackId
+        val cleanId = trackId.removePrefix("yt_")
+        viewModelScope.launch {
+            Log.d(TAG, "Prefetching video for current track: $cleanId")
+            youTubeExtractor.extractVideoStream(cleanId)
+                .onSuccess { info ->
+                    // Only cache if still the same track
+                    if (playbackState.value.currentTrack?.id == trackId) {
+                        _videoStreamInfo.value = info
+                        Log.d(TAG, "Video prefetched for $cleanId (${info.width}x${info.height})")
+                    }
+                }
+                .onFailure { e ->
+                    Log.w(TAG, "Video prefetch failed for $cleanId: ${e.message}")
+                    // Don't crash — music continues
+                }
+        }
+    }
+    
+    /**
+     * Toggle video mode ON/OFF. Only for YouTube tracks.
+     * If video is prefetched, shows instantly. Otherwise extracts on demand.
+     */
+    fun toggleVideoMode() {
+        val track = playbackState.value.currentTrack ?: return
+        if (track.source != TrackSource.YOUTUBE) return
+        
+        // If already in video mode, disable it
+        if (_isVideoMode.value) {
+            _isVideoMode.value = false
+            return
+        }
+        
+        // If video is already prefetched, enable instantly
+        val cached = _videoStreamInfo.value
+        if (cached != null) {
+            _isVideoMode.value = true
+            return
+        }
+        
+        // Otherwise extract on demand
+        _isVideoLoading.value = true
+        val cleanId = track.id.removePrefix("yt_")
+        viewModelScope.launch {
+            youTubeExtractor.extractVideoStream(cleanId)
+                .onSuccess { info ->
+                    if (playbackState.value.currentTrack?.id == track.id) {
+                        _videoStreamInfo.value = info
+                        _isVideoMode.value = true
+                    }
+                }
+                .onFailure { e ->
+                    Log.e(TAG, "Video extraction failed: ${e.message}")
+                    // Stay in audio mode — no crash
+                }
+            _isVideoLoading.value = false
+        }
+    }
+    
+    /**
+     * Check if video is available for the current track (YouTube only).
+     */
+    fun isVideoAvailable(): Boolean {
+        return playbackState.value.currentTrack?.source == TrackSource.YOUTUBE
+    }
+    
+    // ======================================================
     
     private fun checkDownloadStatus(trackId: String) {
         viewModelScope.launch {

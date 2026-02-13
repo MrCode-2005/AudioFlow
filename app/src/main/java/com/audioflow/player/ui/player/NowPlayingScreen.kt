@@ -1,5 +1,8 @@
 package com.audioflow.player.ui.player
 
+import android.app.Activity
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -18,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -36,9 +40,15 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.audioflow.player.model.RepeatMode
+import com.audioflow.player.model.TrackSource
 import com.audioflow.player.ui.theme.*
 import kotlin.math.absoluteValue
 import androidx.compose.foundation.pager.HorizontalPager
@@ -63,6 +73,16 @@ fun NowPlayingScreen(
     val showOptionsSheet by viewModel.showOptionsSheet.collectAsState()
     val lyricsEnabled by viewModel.lyricsEnabled.collectAsState()
     val track = playbackState.currentTrack
+    
+    // Video state
+    val isVideoMode by viewModel.isVideoMode.collectAsState()
+    val videoStreamInfo by viewModel.videoStreamInfo.collectAsState()
+    val isVideoLoading by viewModel.isVideoLoading.collectAsState()
+    
+    // Orientation detection for fullscreen video
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val activity = LocalContext.current as? Activity
     
     // Check if current track is liked
     val isLiked = track?.id?.let { likedSongIds.contains(it) } ?: false
@@ -124,18 +144,73 @@ fun NowPlayingScreen(
         artworkUri = track?.artworkUri
     )
 
+    // ===================== LANDSCAPE FULLSCREEN VIDEO =====================
+    if (isVideoMode && isLandscape && videoStreamInfo != null) {
+        // Back button exits fullscreen (returns to portrait), not closing the player
+        androidx.activity.compose.BackHandler {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+
+        // Fullscreen video — ALL controls hidden per spec Section 5
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            VideoPlayerView(
+                videoUrl = videoStreamInfo!!.videoStreamUrl,
+                currentPosition = playbackState.currentPosition,
+                isPlaying = playbackState.isPlaying,
+                modifier = Modifier.fillMaxSize()
+            )
+            
+            // Small exit-fullscreen overlay button (top-left)
+            IconButton(
+                onClick = {
+                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.FullscreenExit,
+                    contentDescription = "Exit fullscreen",
+                    tint = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        return
+    }
+    
+    // Restore orientation to sensor when video mode is off in landscape
+    LaunchedEffect(isVideoMode) {
+        if (!isVideoMode && isLandscape) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        dynamicBgColor,
-                        SpotifyBlack
-                    ),
-                    startY = 0f,
-                    endY = Float.POSITIVE_INFINITY // Spans entire height, fading naturally
-                )
+            .then(
+                // When video is playing, background is transparent (per spec Section 2, Rule 4)
+                if (isVideoMode && videoStreamInfo != null) {
+                    Modifier.background(Color.Transparent)
+                } else {
+                    Modifier.background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                dynamicBgColor,
+                                SpotifyBlack
+                            ),
+                            startY = 0f,
+                            endY = Float.POSITIVE_INFINITY
+                        )
+                    )
+                }
             )
             .pointerInput(Unit) {
                 var totalDragAmount = 0f
@@ -256,59 +331,72 @@ fun NowPlayingScreen(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                val queue = playbackState.queue
-                
-                if (queue.isEmpty()) {
-                     // Placeholder for empty queue
-                     AsyncImage(
-                        model = null,
-                        contentDescription = "No music",
+                // ===== VIDEO MODE: Replace album art with video =====
+                if (isVideoMode && videoStreamInfo != null) {
+                    Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 32.dp)
-                            .aspectRatio(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(SpotifySurfaceVariant),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    androidx.compose.foundation.pager.HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 40.dp), // Show thin strips on sides
-                        pageSpacing = 12.dp, // Tighter spacing for thin strip effect
-                        beyondBoundsPageCount = 5 // Preload 5 items each side for smooth swiping
-                    ) { page ->
-                        val track = queue.getOrNull(page)
-                        
-                        Card(
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp)
+                            .aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        VideoPlayerView(
+                            videoUrl = videoStreamInfo!!.videoStreamUrl,
+                            currentPosition = playbackState.currentPosition,
+                            isPlaying = playbackState.isPlaying,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+                // ===== NORMAL MODE: Album art carousel =====
+                else {
+                    val queue = playbackState.queue
+                    
+                    if (queue.isEmpty()) {
+                         AsyncImage(
+                            model = null,
+                            contentDescription = "No music",
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .fillMaxSize()
+                                .padding(horizontal = 32.dp)
                                 .aspectRatio(1f)
-                                .clip(RoundedCornerShape(12.dp))
-                                .graphicsLayer {
-                                    // Calculate the absolute offset for the current page from the scroll position
-                                    val pageOffset = (
-                                        (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                                    ).absoluteValue
-
-                                    // Scale the page based on its distance from the center
-                                    // Center item is 1f, side items are slightly smaller if desired
-                                    // standard carousel often keeps them same size or slightly smaller
-                                    // For "pixel perfect" to screenshot 1, they look full size but just cut off
-                                    
-                                    // We can keep it simple first: fully opaque
-                                    alpha = if (pageOffset < 1.0f) 1f else 0.5f // Dim side items slightly? Reference image looks fully bright
-                                },
-                            shape = RoundedCornerShape(12.dp),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-                        ) {
-                            AsyncImage(
-                                model = track?.artworkUri,
-                                contentDescription = track?.title,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(SpotifySurfaceVariant),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        androidx.compose.foundation.pager.HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 40.dp),
+                            pageSpacing = 12.dp,
+                            beyondBoundsPageCount = 5
+                        ) { page ->
+                            val track = queue.getOrNull(page)
+                            
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .graphicsLayer {
+                                        val pageOffset = (
+                                            (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                                        ).absoluteValue
+                                        alpha = if (pageOffset < 1.0f) 1f else 0.5f
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                            ) {
+                                AsyncImage(
+                                    model = track?.artworkUri,
+                                    contentDescription = track?.title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
                         }
                     }
                 }
@@ -598,13 +686,26 @@ fun NowPlayingScreen(
                     }
                     
                     Row {
-                        IconButton(onClick = { /* Queue */ }) {
-                            Icon(
-                                imageVector = Icons.Default.QueueMusic,
-                                contentDescription = "Queue",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(20.dp)
-                            )
+                        // Video toggle button (replaces unused QueueMusic icon)
+                        // Only visible for YouTube tracks per spec Section 1
+                        if (track?.source == TrackSource.YOUTUBE) {
+                            IconButton(onClick = { viewModel.toggleVideoMode() }) {
+                                if (isVideoLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        color = SpotifyGreen,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = if (isVideoMode) Icons.Default.MusicVideo
+                                                      else Icons.Default.OndemandVideo,
+                                        contentDescription = if (isVideoMode) "Switch to music" else "Play video",
+                                        tint = if (isVideoMode) SpotifyGreen else TextSecondary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -737,4 +838,69 @@ private fun formatDuration(millis: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
+}
+
+/**
+ * Video player composable using ExoPlayer via AndroidView.
+ * Muted (audio from existing music player). Syncs position with audio player.
+ * Handles lifecycle properly with DisposableEffect.
+ */
+@Composable
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+fun VideoPlayerView(
+    videoUrl: String,
+    currentPosition: Long,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    // Must match the User-Agent used in YouTubeExtractor to avoid 403
+    val userAgent = "com.google.android.youtube/19.09.36 (Linux; U; Android 14) gzip"
+
+    val exoPlayer = remember(videoUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            volume = 0f // Mute — audio from music player
+            repeatMode = Player.REPEAT_MODE_ALL
+            
+            val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                .setUserAgent(userAgent)
+                .setAllowCrossProtocolRedirects(true)
+            
+            val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                .createMediaSource(MediaItem.fromUri(videoUrl))
+                
+            setMediaSource(mediaSource)
+            prepare()
+            seekTo(currentPosition)
+            playWhenReady = isPlaying
+        }
+    }
+
+    // Sync play/pause with music player
+    LaunchedEffect(isPlaying) {
+        if (isPlaying && !exoPlayer.isPlaying) exoPlayer.play()
+        else if (!isPlaying && exoPlayer.isPlaying) exoPlayer.pause()
+    }
+    
+    // Drift correction: if video drifts >2s from audio, snap back
+    LaunchedEffect(currentPosition) {
+        val drift = (exoPlayer.currentPosition - currentPosition).absoluteValue
+        if (drift > 2000) exoPlayer.seekTo(currentPosition)
+    }
+
+    // Cleanup
+    DisposableEffect(videoUrl) {
+        onDispose { exoPlayer.release() }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                player = exoPlayer
+                useController = false
+                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            }
+        },
+        modifier = modifier
+    )
 }

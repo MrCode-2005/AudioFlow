@@ -575,7 +575,8 @@ class YouTubeExtractor @Inject constructor(
      */
     suspend fun extractVideoStream(videoId: String): Result<YouTubeVideoStreamInfo> =
         withContext(Dispatchers.IO) {
-            Log.d(TAG, "Extracting video stream for: $videoId")
+            val cleanVideoId = videoId.removePrefix("yt_")
+            Log.d(TAG, "Extracting video stream for: $cleanVideoId")
             
             // Wait for yt-dlp initialization
             var attempts = 0
@@ -589,11 +590,21 @@ class YouTubeExtractor @Inject constructor(
             }
             
             try {
-                val videoUrl = "https://www.youtube.com/watch?v=$videoId"
+                val videoUrl = "https://www.youtube.com/watch?v=$cleanVideoId"
                 val request = YoutubeDLRequest(videoUrl)
                 request.addOption("--no-playlist")
-                // Request best video + audio for background playback
                 request.addOption("-f", "best[height<=720]/bestvideo[height<=720]+bestaudio/best")
+                
+                // Use Android player client for mobile-friendly URLs
+                request.addOption("--extractor-args", "youtube:player_client=android")
+                val androidUserAgent = "com.google.android.youtube/19.09.36 (Linux; U; Android 14) gzip"
+                request.addOption("--user-agent", androidUserAgent)
+                
+                // Add cookies for age-restricted/premium content
+                val cookies = cookieManager.getCookies()
+                if (cookies.isNotEmpty()) {
+                    request.addOption("--add-header", "Cookie:$cookies")
+                }
                 
                 val videoInfo = YoutubeDL.getInstance().getInfo(request)
                 
