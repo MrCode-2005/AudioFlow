@@ -85,7 +85,9 @@ class PlayerViewModel @Inject constructor(
                 if (track != null) {
                     if (track.id != lastFetchedTrackId) {
                         lastFetchedTrackId = track.id
-                        fetchLyrics(track.title, track.artist ?: "Unknown", track.duration)
+                        fetchLyrics(track.title, track.artist ?: "Unknown", track.duration, track.id)
+                        // Pre-fetch lyrics for next 2 songs in queue
+                        preFetchAdjacentLyrics(state.queue, state.currentQueueIndex)
                     }
                     // Check download status
                     checkDownloadStatus(track.id)
@@ -122,17 +124,36 @@ class PlayerViewModel @Inject constructor(
     }
 
     
-    private fun fetchLyrics(title: String, artist: String, duration: Long) {
+    private fun fetchLyrics(title: String, artist: String, duration: Long, trackId: String) {
         viewModelScope.launch {
             _isLoadingLyrics.value = true
             _lyrics.value = null
             
-            lyricsProvider.getLyrics(title, artist, duration)
+            lyricsProvider.getLyrics(title, artist, duration, trackId)
                 .onSuccess { result ->
                     _lyrics.value = result
                 }
             
             _isLoadingLyrics.value = false
+        }
+    }
+    
+    /**
+     * Pre-fetch lyrics for the next 2 songs in the queue (background, low priority).
+     * This ensures lyrics are cached and display instantly when the user swipes.
+     */
+    private fun preFetchAdjacentLyrics(queue: List<com.audioflow.player.model.Track>, currentIndex: Int) {
+        viewModelScope.launch {
+            // Pre-fetch next 2 tracks
+            for (offset in 1..2) {
+                val nextTrack = queue.getOrNull(currentIndex + offset) ?: continue
+                lyricsProvider.preFetchLyrics(
+                    title = nextTrack.title,
+                    artist = nextTrack.artist ?: "Unknown",
+                    duration = nextTrack.duration,
+                    trackId = nextTrack.id
+                )
+            }
         }
     }
     
