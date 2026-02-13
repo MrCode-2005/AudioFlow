@@ -102,6 +102,9 @@ dependencies {
     // Coil
     implementation(libs.coil.compose)
 
+    // Palette for dynamic color extraction from album art
+    implementation("androidx.palette:palette-ktx:1.0.0")
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.guava)
