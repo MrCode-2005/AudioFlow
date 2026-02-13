@@ -119,10 +119,24 @@ fun NowPlayingScreen(
     }
 
 
+    // Dynamic background color extraction from current track's artwork
+    val dynamicBgColor = rememberDynamicBackgroundColor(
+        artworkUri = track?.artworkUri
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyBlack)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        dynamicBgColor,
+                        SpotifyBlack
+                    ),
+                    startY = 0f,
+                    endY = Float.POSITIVE_INFINITY // Spans entire height, fading naturally
+                )
+            )
             .pointerInput(Unit) {
                 var totalDragAmount = 0f
                 detectVerticalDragGestures(
