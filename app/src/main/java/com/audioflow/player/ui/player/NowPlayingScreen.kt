@@ -611,7 +611,7 @@ fun NowPlayingScreen(
             }
             
             // Lyrics preview section (conditional on lyricsEnabled preference)
-            if (lyrics != null && lyricsEnabled) {
+            if (lyrics != null && lyrics?.hasDisplayableContent() == true && lyricsEnabled) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

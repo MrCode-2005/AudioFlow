@@ -350,6 +350,17 @@ class LyricsProvider @Inject constructor() {
     // RESULT SELECTION & PARSING
     // ============================================================
 
+    /**
+     * Android's JSONObject.optString() has a known bug: when the JSON value is null,
+     * it returns the literal string "null" instead of the fallback. This helper fixes that.
+     */
+    private fun JSONObject.safeOptString(key: String): String? {
+        if (isNull(key)) return null
+        val value = optString(key, "")
+        // Guard against the literal "null" string from Android's broken optString
+        return if (value == "null" || value.isBlank()) null else value
+    }
+
     private fun selectBestResult(results: JSONArray, targetDurationSec: Long?): JSONObject? {
         var bestResult: JSONObject? = null
         var bestScore = -1
@@ -358,8 +369,8 @@ class LyricsProvider @Inject constructor() {
             val item = results.getJSONObject(i)
             if (item.optBoolean("instrumental", false)) continue
 
-            val plainLyrics = item.optString("plainLyrics", "")
-            val syncedLyrics = item.optString("syncedLyrics", "")
+            val plainLyrics = item.safeOptString("plainLyrics") ?: ""
+            val syncedLyrics = item.safeOptString("syncedLyrics") ?: ""
             if (plainLyrics.isBlank() && syncedLyrics.isBlank()) continue
 
             var score = 0
@@ -391,19 +402,28 @@ class LyricsProvider @Inject constructor() {
     }
 
     private fun parseLyricsFromJson(json: JSONObject): Result<LyricsResult> {
-        val plainLyrics = json.optString("plainLyrics", null)
-        val syncedLyrics = json.optString("syncedLyrics", null)
+        val plainLyrics = json.safeOptString("plainLyrics")
+        val syncedLyrics = json.safeOptString("syncedLyrics")
 
         if (plainLyrics.isNullOrBlank() && syncedLyrics.isNullOrBlank()) {
             return Result.failure(Exception("No lyrics available"))
         }
 
         val syncedLines = syncedLyrics?.let { parseSyncedLyrics(it) }
+            ?.takeIf { it.isNotEmpty() } // Empty parsed list = no usable synced lyrics
+
+        val plainText = plainLyrics
+            ?: syncedLyrics?.replace(Regex("\\[\\d+:\\d+\\.\\d+\\]"), "")?.trim()
+            ?: ""
+
+        // Final sanity check: do we actually have displayable content?
+        val hasContent = plainText.lines().any { it.isNotBlank() } || syncedLines?.isNotEmpty() == true
+        if (!hasContent) {
+            return Result.failure(Exception("No displayable lyrics"))
+        }
 
         return Result.success(LyricsResult(
-            plainText = plainLyrics
-                ?: syncedLyrics?.replace(Regex("\\[\\d+:\\d+\\.\\d+\\]"), "")?.trim()
-                ?: "",
+            plainText = plainText,
             syncedLines = syncedLines,
             source = "lrclib"
         ))
@@ -488,6 +508,15 @@ data class LyricsResult(
     val syncedLines: List<LyricLine>? = null,
     val source: String = "lrclib"
 ) {
+    /**
+     * Whether this result has any actual displayable lyrics content.
+     * Used by the UI to avoid showing an empty lyrics card.
+     */
+    fun hasDisplayableContent(): Boolean {
+        if (syncedLines != null && syncedLines.any { it.text.isNotBlank() }) return true
+        return plainText.lines().any { it.isNotBlank() }
+    }
+
     fun getPreview(lineCount: Int = 5): String {
         return plainText.lines()
             .filter { it.isNotBlank() }
