@@ -123,6 +123,7 @@ fun TrackListItem(
     showAlbumArt: Boolean = true,
     isPlaying: Boolean = false,
     onDeleteClick: ((com.audioflow.player.model.Track) -> Unit)? = null,
+    onOptionsClick: (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -168,7 +169,13 @@ fun TrackListItem(
         
         trailingContent?.invoke() ?: run {
             Box {
-                IconButton(onClick = { showMenu = true }) {
+                IconButton(onClick = { 
+                    if (onOptionsClick != null) {
+                        onOptionsClick()
+                    } else {
+                        showMenu = true 
+                    }
+                }) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
                         contentDescription = "More options",
@@ -176,42 +183,44 @@ fun TrackListItem(
                     )
                 }
                 
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Play") },
-                        onClick = {
-                            showMenu = false
-                            onClick()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Add to queue") },
-                        onClick = {
-                            showMenu = false
-                            // TODO: Add to queue functionality
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.QueueMusic, contentDescription = null)
-                        }
-                    )
-                    if (onDeleteClick != null) {
-                        Divider()
+                if (onOptionsClick == null) {
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
                         DropdownMenuItem(
-                            text = { Text("Delete", color = Color.Red) },
+                            text = { Text("Play") },
                             onClick = {
                                 showMenu = false
-                                showDeleteConfirmation = true
+                                onClick()
                             },
                             leadingIcon = {
-                                Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red)
+                                Icon(Icons.Default.PlayArrow, contentDescription = null)
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text("Add to queue") },
+                            onClick = {
+                                showMenu = false
+                                // TODO: Add to queue functionality
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.QueueMusic, contentDescription = null)
+                            }
+                        )
+                        if (onDeleteClick != null) {
+                            Divider()
+                            DropdownMenuItem(
+                                text = { Text("Delete", color = Color.Red) },
+                                onClick = {
+                                    showMenu = false
+                                    showDeleteConfirmation = true
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red)
+                                }
+                            )
+                        }
                     }
                 }
             }
