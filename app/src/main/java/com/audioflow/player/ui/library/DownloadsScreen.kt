@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,9 +23,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
@@ -47,11 +58,27 @@ fun DownloadsScreen(
     var isShuffleEnabled by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    
+    var selectedTrackForOptions by remember { mutableStateOf<Track?>(null) }
+    var selectedEntityForOptions by remember { mutableStateOf<DownloadedSongEntity?>(null) }
+    var showPlaylistSheet by remember { mutableStateOf(false) }
+    var trackToAddToPlaylist by remember { mutableStateOf<Track?>(null) }
+    var moveToSongId by remember { mutableStateOf<String?>(null) }
     var newFolderName by remember { mutableStateOf("") }
     var currentFolderId by remember { mutableStateOf<String?>(null) }
-    var moveToSongId by remember { mutableStateOf<String?>(null) }
+
     var showRenameFolderDialog by remember { mutableStateOf<String?>(null) }
     var renameFolderText by remember { mutableStateOf("") }
+    var showAddSongsSheet by remember { mutableStateOf(false) }
+    
+    // Drag & Drop State
+    var isDragging by remember { mutableStateOf(false) }
+    var draggedItem by remember { mutableStateOf<DownloadedSongEntity?>(null) }
+    var dragPosition by remember { mutableStateOf(Offset.Zero) }
+    var dragChange by remember { mutableStateOf(Offset.Zero) }
+    
+    val folderBounds = remember { mutableStateMapOf<String, Rect>() }
+    var currentDropTargetId by remember { mutableStateOf<String?>(null) }
     
     // Current folder name for header
     val currentFolderName = currentFolderId?.let { fid -> folders.find { it.id == fid }?.name }
@@ -275,96 +302,109 @@ fun DownloadsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.Center, // Centered
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left side buttons
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Shuffle Toggle
+                IconButton(
+                    onClick = { isShuffleEnabled = !isShuffleEnabled },
+                    modifier = Modifier
+                        .size(48.dp)
                 ) {
-                    // Delete All Button
-                    IconButton(
-                        onClick = { showDeleteAllDialog = true },
+                    Icon(
+                        imageVector = Icons.Default.Shuffle,
+                        contentDescription = "Shuffle",
+                        tint = if (isShuffleEnabled) SpotifyGreen else TextSecondary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(24.dp))
+
+                // Play button (only for completed downloads)
+                // Always show layout space even if hidden? No, just hide if empty?
+                // If hidden, the layout shifts.
+                // But Play is central.
+                if (completedDownloads.isNotEmpty()) {
+                    FloatingActionButton(
+                        onClick = {
+                            val tracksToPlay = if (isShuffleEnabled) {
+                                completedDownloads.shuffled()
+                            } else {
+                                completedDownloads
+                            }.map { entityToTrack(it) }
+                            
+                            if (tracksToPlay.isNotEmpty()) {
+                                viewModel.playDownloadedPlaylist(tracksToPlay, 0)
+                                onNavigateToPlayer()
+                            }
+                        },
+                        containerColor = SpotifyGreen,
+                        contentColor = Color.Black,
                         modifier = Modifier
-                            .size(40.dp)
-                            .background(Color.Red.copy(alpha = 0.2f), CircleShape)
+                            .size(56.dp)
+                            .clip(CircleShape) // Ensure circle clip
                     ) {
                         Icon(
-                            imageVector = Icons.Default.DeleteSweep,
-                            contentDescription = "Delete All",
-                            tint = Color.Red,
-                            modifier = Modifier.size(20.dp)
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Play All",
+                            modifier = Modifier.size(32.dp)
                         )
                     }
-                    
-                    // Shuffle Toggle
+                } else {
+                    // Placeholder sized box to keep alignment if needed, or just nothing.
+                    Spacer(modifier = Modifier.size(56.dp)) 
+                }
+                
+                Spacer(modifier = Modifier.width(24.dp))
+
+                // Delete All Button
+                IconButton(
+                    onClick = { showDeleteAllDialog = true },
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteSweep,
+                        contentDescription = "Delete All",
+                        tint = TextSecondary, // Consistent with other icons (was Red previously)
+                        // Or keep Red? User said "Delete all". Usually danger is red.
+                        // But standard icons are white/secondary.
+                        // I'll keep it TextSecondary for consistency, maybe red tint on click?
+                        // Or just Red as it was.
+                        // tint = Color.Red 
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+                
+                // Create Folder button (Only at Root)
+                if (currentFolderId == null) {
+                    Spacer(modifier = Modifier.width(16.dp))
                     IconButton(
-                        onClick = { isShuffleEnabled = !isShuffleEnabled },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(
-                                if (isShuffleEnabled) SpotifyGreen.copy(alpha = 0.2f) 
-                                else Color.Transparent,
-                                CircleShape
-                            )
+                        onClick = { showCreateFolderDialog = true },
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Shuffle,
-                            contentDescription = "Shuffle",
-                            tint = if (isShuffleEnabled) SpotifyGreen else TextSecondary,
-                            modifier = Modifier.size(20.dp)
+                            imageVector = Icons.Default.CreateNewFolder,
+                            contentDescription = "New Folder",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                 }
                 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Spacer(modifier = Modifier.width(16.dp))
+                
+                // Add Songs
+                IconButton(
+                    onClick = { showAddSongsSheet = true },
+                    modifier = Modifier.size(48.dp)
                 ) {
-                    // Create Folder button
-                    if (currentFolderId == null) {
-                        IconButton(
-                            onClick = { showCreateFolderDialog = true },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(SpotifyGreen.copy(alpha = 0.2f), CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CreateNewFolder,
-                                contentDescription = "New Folder",
-                                tint = SpotifyGreen,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                    
-                    // Play button (only for completed downloads)
-                    if (completedDownloads.isNotEmpty()) {
-                        FloatingActionButton(
-                            onClick = {
-                                val tracksToPlay = if (isShuffleEnabled) {
-                                    completedDownloads.shuffled()
-                                } else {
-                                    completedDownloads
-                                }.map { entityToTrack(it) }
-                                
-                                if (tracksToPlay.isNotEmpty()) {
-                                    viewModel.playDownloadedPlaylist(tracksToPlay, 0)
-                                    onNavigateToPlayer()
-                                }
-                            },
-                            containerColor = SpotifyGreen,
-                            contentColor = Color.Black,
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Play All",
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add Songs",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
             }
             
@@ -421,7 +461,9 @@ fun DownloadsScreen(
                                     renameFolderText = folder.name
                                     showRenameFolderDialog = folder.id
                                 },
-                                onDelete = { viewModel.deleteFolder(folder.id) }
+                                onDelete = { viewModel.deleteFolder(folder.id) },
+                                isDropTarget = currentDropTargetId == folder.id,
+                                modifier = Modifier.onGloballyPositioned { folderBounds[folder.id] = it.boundsInRoot() }
                             )
                         }
                         
@@ -435,6 +477,49 @@ fun DownloadsScreen(
                     }
                     
                     itemsIndexed(allDownloads) { index, entity ->
+                        var itemBounds by remember { mutableStateOf(Rect.Zero) }
+                        
+                        // Modifier for drag
+                        val dragModifier = Modifier
+                            .onGloballyPositioned { itemBounds = it.boundsInRoot() }
+                            .pointerInput(entity.id) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { offset ->
+                                        isDragging = true
+                                        draggedItem = entity
+                                        dragPosition = itemBounds.topLeft
+                                        dragChange = Offset.Zero
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        dragChange += dragAmount
+                                        
+                                        val currentItemRect = Rect(offset = dragPosition + dragChange, size = itemBounds.size)
+                                        val center = currentItemRect.center
+                                        
+                                        val target = folderBounds.entries.find { (_, rect) ->
+                                            rect.contains(center)
+                                        }?.key
+                                        
+                                        currentDropTargetId = target
+                                    },
+                                    onDragEnd = {
+                                        isDragging = false
+                                        if (currentDropTargetId != null) {
+                                            viewModel.moveSongToFolder(entity.id, currentDropTargetId)
+                                        }
+                                        currentDropTargetId = null
+                                        draggedItem = null
+                                    },
+                                    onDragCancel = {
+                                        isDragging = false
+                                        currentDropTargetId = null
+                                        draggedItem = null
+                                    }
+                                )
+                            }
+                            .alpha(if (isDragging && draggedItem?.id == entity.id) 0f else 1f)
+                        
                         DownloadedSongItem(
                             entity = entity,
                             index = index,
@@ -451,7 +536,12 @@ fun DownloadsScreen(
                             onMoveUp = { viewModel.moveDownloadUp(entity.id) },
                             onMoveDown = { viewModel.moveDownloadDown(entity.id) },
                             onRetry = { viewModel.retryDownload(entity.id) },
-                            onMoveTo = { moveToSongId = entity.id }
+                            onMoveTo = { moveToSongId = entity.id },
+                            onOptionsClick = {
+                                selectedEntityForOptions = entity
+                                selectedTrackForOptions = entityToTrack(entity)
+                            },
+                            modifier = dragModifier
                         )
                     }
                 }
@@ -473,8 +563,199 @@ fun DownloadsScreen(
                 modifier = Modifier.padding(bottom = 0.dp)
             )
         }
+        
+        // Add Songs Sheet
+        if (showAddSongsSheet) {
+             com.audioflow.player.ui.components.AddSongsToSectionSheet(
+                onDismiss = { showAddSongsSheet = false },
+                onAddTrack = { track ->
+                    viewModel.downloadTrack(track)
+                }
+            )
+        }
+        
+        // Song Options Sheet
+
+        if (selectedTrackForOptions != null && selectedEntityForOptions != null) {
+            val entity = selectedEntityForOptions!!
+            val isCompleted = entity.status == DownloadStatus.COMPLETED
+            
+            com.audioflow.player.ui.components.SongOptionsSheet(
+                isVisible = true,
+                track = selectedTrackForOptions,
+                onDismiss = { 
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                },
+                onPlay = {
+                    if (isCompleted) {
+                         // Find index in completed downloads
+                         val completedTracks = completedDownloads.map { entityToTrack(it) }
+                         val trackToPlay = entityToTrack(entity)
+                         // Determine start index based on matching ID
+                         val startIdx = completedTracks.indexOfFirst { it.id == trackToPlay.id }.coerceAtLeast(0)
+                         viewModel.playDownloadedPlaylist(completedTracks, startIdx)
+                         onNavigateToPlayer()
+                    }
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                },
+                onPlayNext = {
+                    if (isCompleted) {
+                        viewModel.playNextInQueue(selectedTrackForOptions!!)
+                    }
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                },
+                onAddToQueue = {
+                     if (isCompleted) {
+                        viewModel.addToQueue(selectedTrackForOptions!!)
+                     }
+                     selectedTrackForOptions = null
+                     selectedEntityForOptions = null
+                },
+                onAddToPlaylist = {
+                    trackToAddToPlaylist = selectedTrackForOptions
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                    showPlaylistSheet = true
+                },
+                onGoToArtist = { 
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                },
+                onGoToAlbum = { 
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                },
+                onShare = { 
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                },
+                
+                // Move Options
+                showMoveOptions = isCompleted,
+                onMoveUp = {
+                     viewModel.moveDownloadUp(entity.id)
+                     selectedTrackForOptions = null
+                     selectedEntityForOptions = null
+                },
+                onMoveDown = {
+                     viewModel.moveDownloadDown(entity.id)
+                     selectedTrackForOptions = null
+                     selectedEntityForOptions = null
+                },
+                onMoveTo = {
+                     moveToSongId = entity.id
+                     selectedTrackForOptions = null
+                     selectedEntityForOptions = null
+                },
+                
+                isDownloaded = isCompleted,
+                isFailed = entity.status == DownloadStatus.FAILED,
+                onRemoveDownload = {
+                    // This is "Remove download" action
+                    viewModel.deleteDownload(entity.id)
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                },
+                onRetry = {
+                     viewModel.retryDownload(entity.id)
+                     selectedTrackForOptions = null
+                     selectedEntityForOptions = null
+                },
+                
+                onDelete = {
+                    // Same as remove download here
+                    viewModel.deleteDownload(entity.id)
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                },
+                deleteLabel = "Delete"
+            )
+        }
+        
+        // Add to Playlist Sheet
+        if (showPlaylistSheet && trackToAddToPlaylist != null) {
+            val uiState by viewModel.uiState.collectAsState()
+            
+            com.audioflow.player.ui.player.AddToPlaylistSheet(
+                isVisible = true,
+                isLiked = false, // TODO: Check if liked
+                playlists = uiState.playlists.map { playlist ->
+                    com.audioflow.player.ui.player.PlaylistItem(
+                        id = playlist.id,
+                        name = playlist.name,
+                        songCount = playlist.tracks.size,
+                        thumbnailUri = playlist.artworkUri?.toString(),
+                        containsSong = trackToAddToPlaylist?.id?.let { trackId -> 
+                            playlist.tracks.any { it.id == trackId } 
+                        } ?: false
+                    )
+                },
+                onDismiss = { 
+                    showPlaylistSheet = false 
+                    trackToAddToPlaylist = null
+                },
+                onPlaylistClick = { playlistItem ->
+                    trackToAddToPlaylist?.let { track ->
+                         val playlist = uiState.playlists.find { it.id == playlistItem.id }
+                         if (playlist != null) {
+                             viewModel.addTrackToPlaylist(track, playlist)
+                         }
+                    }
+                    showPlaylistSheet = false
+                    trackToAddToPlaylist = null
+                },
+                onLikedSongsClick = {},
+                onNewFolderClick = {},
+                onNewPlaylistClick = {},
+                onRemoveFromLikedSongs = {}
+            )
+        }
+        
+        // Drag Overlay
+        if (isDragging && draggedItem != null) {
+            val item = draggedItem!!
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset((dragPosition.x + dragChange.x).roundToInt(), (dragPosition.y + dragChange.y).roundToInt()) }
+                    .width(280.dp)
+                    .background(Color(0xFF282828), RoundedCornerShape(8.dp))
+                    .border(1.dp, SpotifyGreen, RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AsyncImage(
+                        model = item.thumbnailUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = if (currentDropTargetId != null) "Drop to move" else "Move to folder",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SpotifyGreen
+                        )
+                    }
+                }
+            }
+        }
     }
 }
+
+
 
 @Composable
 private fun DownloadedSongItem(
@@ -486,9 +767,12 @@ private fun DownloadedSongItem(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onRetry: () -> Unit,
-    onMoveTo: () -> Unit = {}
+    onMoveTo: () -> Unit = {},
+    onOptionsClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    var showMenu by remember { mutableStateOf(false) }
+    // Delete confirmation dialog - KEPT inside item for direct delete button logic if needed,
+    // but main options menu is now external.
     var showDeleteDialog by remember { mutableStateOf(false) }
     
     // Animation for downloading spinner
@@ -663,101 +947,12 @@ private fun DownloadedSongItem(
         }
         
         // More options
-        Box {
-            IconButton(onClick = { showMenu = true }) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "More options",
-                    tint = TextSecondary
-                )
-            }
-            
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false }
-            ) {
-                if (entity.status == DownloadStatus.COMPLETED) {
-                    DropdownMenuItem(
-                        text = { Text("Play") },
-                        onClick = {
-                            showMenu = false
-                            onPlay()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
-                        }
-                    )
-                }
-                
-                if (entity.status == DownloadStatus.FAILED) {
-                    DropdownMenuItem(
-                        text = { Text("Retry Download") },
-                        onClick = {
-                            showMenu = false
-                            onRetry()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.Refresh, contentDescription = null)
-                        }
-                    )
-                }
-                
-                HorizontalDivider()
-                
-                // Move Up (only if not first and completed)
-                if (index > 0 && entity.status == DownloadStatus.COMPLETED) {
-                    DropdownMenuItem(
-                        text = { Text("Move Up") },
-                        onClick = {
-                            showMenu = false
-                            onMoveUp()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = null)
-                        }
-                    )
-                }
-                
-                // Move Down (only if not last and completed)
-                if (index < totalCount - 1 && entity.status == DownloadStatus.COMPLETED) {
-                    DropdownMenuItem(
-                        text = { Text("Move Down") },
-                        onClick = {
-                            showMenu = false
-                            onMoveDown()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
-                        }
-                    )
-                }
-                
-                if (entity.status == DownloadStatus.COMPLETED) {
-                    DropdownMenuItem(
-                        text = { Text("Move To Folder") },
-                        onClick = {
-                            showMenu = false
-                            onMoveTo()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.Folder, contentDescription = null)
-                        }
-                    )
-                }
-                
-                HorizontalDivider()
-                
-                DropdownMenuItem(
-                    text = { Text("Delete", color = Color.Red) },
-                    onClick = {
-                        showMenu = false
-                        showDeleteDialog = true
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red)
-                    }
-                )
-            }
+        IconButton(onClick = onOptionsClick) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "More options",
+                tint = TextSecondary
+            )
         }
     }
 }
@@ -768,23 +963,41 @@ private fun FolderItem(
     songCount: Int,
     onClick: () -> Unit,
     onRename: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    isDropTarget: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
     
+    // Scale animation when used as drop target
+    val scale by animateFloatAsState(
+        targetValue = if (isDropTarget) 1.05f else 1f,
+        label = "scale"
+    )
+    
+    // Border color
+    val borderColor = if (isDropTarget) SpotifyGreen else Color.Transparent
+    val backgroundColor = if (isDropTarget) SpotifyGreen.copy(alpha = 0.2f) else Color.Transparent
+    
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .background(backgroundColor)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Folder icon
         Box(
             modifier = Modifier
-                .size(52.dp)
+                .size(if (isDropTarget) 56.dp else 52.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(SpotifyGreen.copy(alpha = 0.15f)),
+                .background(SpotifyGreen.copy(alpha = 0.15f))
+                .border(
+                    width = if (isDropTarget) 2.dp else 0.dp,
+                    color = borderColor,
+                    shape = RoundedCornerShape(8.dp)
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
