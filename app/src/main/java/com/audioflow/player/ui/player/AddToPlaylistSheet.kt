@@ -28,7 +28,8 @@ data class PlaylistItem(
     val name: String,
     val songCount: Int,
     val thumbnailUri: String? = null,
-    val isLikedSongs: Boolean = false
+    val isLikedSongs: Boolean = false,
+    val containsSong: Boolean = false
 )
 
 /**
@@ -180,7 +181,7 @@ fun AddToPlaylistSheet(
                         },
                         title = playlist.name,
                         subtitle = "${playlist.songCount} song${if (playlist.songCount != 1) "s" else ""}",
-                        isAdded = false,
+                        isAdded = playlist.containsSong,
                         onClick = { onPlaylistClick(playlist) }
                     )
                 }
