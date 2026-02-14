@@ -30,7 +30,8 @@ data class Playlist(
  */
 @Singleton
 class PlaylistManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val trackMetadataManager: TrackMetadataManager
 ) {
     private val prefs = context.getSharedPreferences("playlists", Context.MODE_PRIVATE)
     
@@ -76,14 +77,21 @@ class PlaylistManager @Inject constructor(
     /**
      * Add a track to a playlist
      */
-    fun addToPlaylist(playlistId: String, trackId: String) {
-        addTracksToPlaylist(playlistId, listOf(trackId))
+    fun addToPlaylist(playlistId: String, track: com.audioflow.player.model.Track) {
+        // Save metadata for this track so it can be retrieved later
+        trackMetadataManager.saveTrack(track)
+        addTracksToPlaylist(playlistId, listOf(track))
     }
 
     /**
      * Add multiple tracks to a playlist (optimized)
      */
-    fun addTracksToPlaylist(playlistId: String, trackIds: List<String>) {
+    fun addTracksToPlaylist(playlistId: String, tracks: List<com.audioflow.player.model.Track>) {
+        // Save metadata for all tracks
+        trackMetadataManager.saveTracks(tracks)
+        
+        val trackIds = tracks.map { it.id }
+        
         _playlists.value = _playlists.value.map { playlist ->
             if (playlist.id == playlistId) {
                 val newIds = trackIds.filter { !playlist.trackIds.contains(it) }
