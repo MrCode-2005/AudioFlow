@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
+import com.audioflow.player.data.local.entity.LikedSongEntity
 import javax.inject.Inject
 
 enum class LibraryFilter {
@@ -131,6 +132,14 @@ class LibraryViewModel @Inject constructor(
         playerController.next()
     }
     
+    fun playNextInQueue(track: Track) {
+        playerController.addNext(track)
+    }
+    
+    fun addToQueue(track: Track) {
+         playerController.addToQueue(track)
+    }
+    
     fun deleteTrack(track: Track) {
         viewModelScope.launch {
             val success = mediaRepository.deleteTrack(track.id)
@@ -156,7 +165,7 @@ class LibraryViewModel @Inject constructor(
     
     fun addTrackToPlaylist(track: Track, playlist: Playlist) {
         viewModelScope.launch {
-            playlistManager.addToPlaylist(playlist.id, track.id)
+            playlistManager.addToPlaylist(playlist.id, track)
         }
     }
     
@@ -237,6 +246,12 @@ class LibraryViewModel @Inject constructor(
         }
     }
     
+    fun downloadTrack(track: Track) {
+        viewModelScope.launch {
+            downloadRepository.startDownload(track)
+        }
+    }
+    
     // ========== Folder Management ==========
     val allFolders = downloadRepository.allFolders
     
@@ -265,4 +280,39 @@ class LibraryViewModel @Inject constructor(
     }
     
     fun getSongsByFolder(folderId: String) = downloadRepository.getSongsByFolder(folderId)
+    
+    // ========== Liked Songs Actions ==========
+    fun toggleLike(track: Track) {
+        likedSongsManager.toggleLike(track)
+    }
+
+    // ========== Liked Songs Bulk Actions ==========
+    fun playLikedSongs(songs: List<LikedSongEntity>, shuffle: Boolean = false) {
+        if (songs.isEmpty()) return
+        val tracks = songs.map { likedEntityToTrack(it) }
+        val finalTracks = if (shuffle) tracks.shuffled() else tracks
+        playerController.setQueue(finalTracks, 0)
+    }
+    
+    fun downloadLikedSongs(songs: List<LikedSongEntity>) {
+        songs.forEach { entity ->
+            val track = likedEntityToTrack(entity)
+            downloadTrack(track)
+        }
+    }
+    
+    private fun likedEntityToTrack(entity: LikedSongEntity): Track {
+        return Track(
+            id = entity.id,
+            title = entity.title,
+            artist = entity.artist ?: "Unknown",
+            album = entity.album ?: "Unknown",
+            duration = entity.duration,
+            artworkUri = android.net.Uri.parse(entity.thumbnailUrl ?: ""),
+            contentUri = android.net.Uri.EMPTY,
+            source = com.audioflow.player.model.TrackSource.LOCAL // Or YOUTUBE?
+            // Liked songs can be from anywhere. We assume LOCAL metadata for display usually.
+            // If they are YouTube, they might have youtube specific IDs.
+        )
+    }
 }
