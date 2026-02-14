@@ -392,6 +392,16 @@ class LyricsProvider @Inject constructor() {
             // Prefer longer lyrics content (+1 per 100 chars, max 5)
             score += (plainLyrics.length / 100).coerceAtMost(5)
 
+            // Prefer English/Latin script lyrics over non-Latin scripts (+8 points)
+            // This ensures English translations are chosen when both exist
+            val lyricsToCheck = plainLyrics.ifBlank { syncedLyrics }
+            val latinChars = lyricsToCheck.count { it in 'A'..'Z' || it in 'a'..'z' || it == ' ' }
+            val totalLetters = lyricsToCheck.count { it.isLetter() }
+            if (totalLetters > 0) {
+                val latinRatio = latinChars.toFloat() / totalLetters
+                if (latinRatio > 0.5f) score += 8  // Primarily Latin/English
+            }
+
             if (score > bestScore) {
                 bestScore = score
                 bestResult = item

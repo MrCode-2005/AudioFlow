@@ -204,15 +204,15 @@ fun LyricsScreen(
                                 text = line.text,
                                 style = MaterialTheme.typography.headlineSmall.copy(
                                     fontWeight = if (isCurrentLine) FontWeight.ExtraBold else FontWeight.Bold,
-                                    lineHeight = 36.sp,
-                                    fontSize = if (isCurrentLine) 26.sp else 22.sp
+                                    lineHeight = 40.sp,
+                                    fontSize = if (isCurrentLine) 28.sp else 24.sp
                                 ),
                                 color = when {
                                     isCurrentLine -> Color.White
-                                    isPastLine -> Color.White.copy(alpha = 0.5f)
-                                    else -> Color.White.copy(alpha = 0.7f)
+                                    isPastLine -> Color.White.copy(alpha = 0.45f)
+                                    else -> Color.White.copy(alpha = 0.65f)
                                 },
-                                modifier = Modifier.padding(vertical = 8.dp)
+                                modifier = Modifier.padding(vertical = 10.dp)
                             )
                         }
                         
@@ -235,21 +235,21 @@ fun LyricsScreen(
                 }
             }
             
-            // Bottom controls
+            // Bottom controls — matching Screenshot 4 exactly
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp)
                     .padding(bottom = 32.dp)
             ) {
-                // Share and more buttons
+                // Share (scissors) and more buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     IconButton(onClick = onShareClick) {
                         Icon(
-                            imageVector = Icons.Default.Share,
+                            imageVector = Icons.Default.ContentCut,
                             contentDescription = "Share",
                             tint = Color.White,
                             modifier = Modifier.size(24.dp)
@@ -265,16 +265,16 @@ fun LyricsScreen(
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 
-                // Progress bar
+                // Progress bar — pink/white themed
                 Slider(
                     value = progress,
                     onValueChange = onSeek,
                     colors = SliderDefaults.colors(
                         thumbColor = Color.White,
                         activeTrackColor = Color.White,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                        inactiveTrackColor = Color.White.copy(alpha = 0.25f)
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -295,9 +295,9 @@ fun LyricsScreen(
                     )
                 }
                 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 
-                // Play/Pause button centered
+                // Play/Pause button — black filled circle with white icon (Screenshot 4 style)
                 Box(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center
@@ -306,7 +306,7 @@ fun LyricsScreen(
                         onClick = onPlayPauseClick,
                         modifier = Modifier
                             .size(56.dp)
-                            .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                            .background(Color.Black, CircleShape)
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,

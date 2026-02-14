@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +46,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.audioflow.player.model.RepeatMode
@@ -151,11 +153,29 @@ fun NowPlayingScreen(
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
 
-        // Fullscreen video with minimal controls (play/pause + timeline)
+        // Auto-hide controls state (YouTube-style)
+        var controlsVisible by remember { mutableStateOf(true) }
+        var lastInteraction by remember { mutableLongStateOf(System.currentTimeMillis()) }
+        
+        // Auto-hide after 3 seconds of no interaction
+        LaunchedEffect(lastInteraction, controlsVisible) {
+            if (controlsVisible) {
+                kotlinx.coroutines.delay(3000)
+                controlsVisible = false
+            }
+        }
+
+        // Fullscreen video — tap to toggle controls
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
+                .pointerInput(Unit) {
+                    detectTapGestures {
+                        controlsVisible = !controlsVisible
+                        lastInteraction = System.currentTimeMillis()
+                    }
+                }
         ) {
             VideoPlayerView(
                 videoUrl = videoStreamInfo!!.videoStreamUrl,
@@ -164,92 +184,105 @@ fun NowPlayingScreen(
                 modifier = Modifier.fillMaxSize()
             )
             
-            // Exit fullscreen button (top-left)
-            IconButton(
-                onClick = {
-                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                },
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(16.dp)
+            // Animated visibility for all controls
+            androidx.compose.animation.AnimatedVisibility(
+                visible = controlsVisible,
+                enter = androidx.compose.animation.fadeIn(animationSpec = tween(200)),
+                exit = androidx.compose.animation.fadeOut(animationSpec = tween(200)),
+                modifier = Modifier.fillMaxSize()
             ) {
-                Icon(
-                    imageVector = Icons.Default.FullscreenExit,
-                    contentDescription = "Exit fullscreen",
-                    tint = Color.White.copy(alpha = 0.7f),
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-            
-            // Bottom overlay: play/pause + progress timeline
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.6f),
-                                Color.Black.copy(alpha = 0.8f)
-                            )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Exit fullscreen button (top-left)
+                    IconButton(
+                        onClick = {
+                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(16.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FullscreenExit,
+                            contentDescription = "Exit fullscreen",
+                            tint = Color.White.copy(alpha = 0.85f),
+                            modifier = Modifier.size(32.dp)
                         )
-                    )
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Progress bar with timestamps
-                var landscapeSlider by remember { mutableStateOf<Float?>(null) }
-                Slider(
-                    value = landscapeSlider ?: playbackState.progress,
-                    onValueChange = { landscapeSlider = it },
-                    onValueChangeFinished = {
-                        landscapeSlider?.let { viewModel.seekToProgress(it) }
-                        landscapeSlider = null
-                    },
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = Color.White,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = formatDuration(playbackState.currentPosition),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
-                    Text(
-                        text = formatDuration(playbackState.duration),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
+                    }
+                    
+                    // Center play/pause button (large, YouTube-style)
+                    IconButton(
+                        onClick = {
+                            viewModel.togglePlayPause()
+                            lastInteraction = System.currentTimeMillis()
+                        },
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(72.dp)
+                            .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+                    
+                    // Bottom timeline (YouTube-style, at very bottom)
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.5f)
+                                    )
+                                )
+                            )
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 4.dp)
+                    ) {
+                        var landscapeSlider by remember { mutableStateOf<Float?>(null) }
+                        
+                        // Timestamps row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = formatDuration(playbackState.currentPosition),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                            Text(
+                                text = formatDuration(playbackState.duration),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                        }
+                        
+                        // Thin progress bar at very bottom
+                        Slider(
+                            value = landscapeSlider ?: playbackState.progress,
+                            onValueChange = {
+                                landscapeSlider = it
+                                lastInteraction = System.currentTimeMillis()
+                            },
+                            onValueChangeFinished = {
+                                landscapeSlider?.let { viewModel.seekToProgress(it) }
+                                landscapeSlider = null
+                            },
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.Red,
+                                activeTrackColor = Color.Red,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
-                
-                // Play/Pause button
-                IconButton(
-                    onClick = { viewModel.togglePlayPause() },
-                    modifier = Modifier
-                        .size(56.dp)
-                        .background(Color.White.copy(alpha = 0.15f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
-                        tint = Color.White,
-                        modifier = Modifier.size(36.dp)
-                    )
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
             }
         }
         return
@@ -974,6 +1007,8 @@ fun VideoPlayerView(
                 player = exoPlayer
                 useController = false
                 setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                // Center-crop: fill entire screen, may crop edges but no letterboxing
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             }
         },
         modifier = modifier
