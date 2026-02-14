@@ -127,7 +127,7 @@ fun LyricsScreen(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        LyricsPinkDark,
+                        LyricsPink,
                         LyricsPink,
                         LyricsPink
                     )
