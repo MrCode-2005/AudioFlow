@@ -952,11 +952,48 @@ class PlayerController @Inject constructor(
     }
     
     fun addToQueue(track: Track) {
-        currentQueue = currentQueue + track
+        if (!isControllerReady || mediaController == null) return
         
-        val mediaItem = createMediaItemForTrack(track)
+        scope.launch {
+            val mediaItem = createMediaItemForTrack(track)
+            mediaController?.addMediaItem(mediaItem)
+            
+            // Update local queue state
+            currentQueue = currentQueue + track
+            updatePlaybackState()
+        }
+    }
+    
+    fun addNext(track: Track) {
+        if (!isControllerReady || mediaController == null) {
+            // Fallback if not ready: just play it now or add to queue
+            addToQueue(track)
+            return
+        }
         
-        mediaController?.addMediaItem(mediaItem)
+        scope.launch {
+            val controller = mediaController ?: return@launch
+            val nextIndex = controller.currentMediaItemIndex + 1
+            val mediaItem = createMediaItemForTrack(track)
+            
+            if (nextIndex <= controller.mediaItemCount) {
+                controller.addMediaItem(nextIndex, mediaItem)
+                
+                // Update local queue state
+                val mutableQueue = currentQueue.toMutableList()
+                if (nextIndex <= mutableQueue.size) {
+                    mutableQueue.add(nextIndex, track)
+                    currentQueue = mutableQueue
+                } else {
+                    currentQueue = currentQueue + track
+                }
+            } else {
+                controller.addMediaItem(mediaItem)
+                currentQueue = currentQueue + track
+            }
+            updatePlaybackState()
+            Log.d(TAG, "Added to queue next: ${track.title}")
+        }
     }
     
     fun clearError() {

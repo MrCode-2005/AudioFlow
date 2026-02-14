@@ -29,6 +29,7 @@ enum class LikeButtonState {
 
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
     private val playerController: PlayerController,
     private val likedSongsManager: LikedSongsManager,
     private val playlistManager: PlaylistManager,
@@ -39,6 +40,13 @@ class PlayerViewModel @Inject constructor(
     
     companion object {
         private const val TAG = "PlayerViewModel"
+        private const val PREFS_NAME = "player_prefs"
+        private const val KEY_LYRICS_ENABLED = "lyrics_enabled"
+    }
+    
+    // Preferences
+    private val prefs by lazy { 
+        context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) 
     }
     
     val playbackState = playerController.playbackState
@@ -74,8 +82,8 @@ class PlayerViewModel @Inject constructor(
     private val _showOptionsSheet = MutableStateFlow(false)
     val showOptionsSheet: StateFlow<Boolean> = _showOptionsSheet.asStateFlow()
     
-    // Lyrics visibility preference (default: on)
-    private val _lyricsEnabled = MutableStateFlow(true)
+    // Lyrics visibility preference (persisted)
+    private val _lyricsEnabled = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_ENABLED, true))
     val lyricsEnabled: StateFlow<Boolean> = _lyricsEnabled.asStateFlow()
     
     // ==================== VIDEO STATE ====================
@@ -347,7 +355,9 @@ class PlayerViewModel @Inject constructor(
     }
     
     fun toggleLyrics() {
-        _lyricsEnabled.value = !_lyricsEnabled.value
+        val newState = !_lyricsEnabled.value
+        _lyricsEnabled.value = newState
+        prefs.edit().putBoolean(KEY_LYRICS_ENABLED, newState).apply()
     }
     
     // Go to Artist - triggers search for artist name
@@ -400,10 +410,10 @@ class PlayerViewModel @Inject constructor(
         if (name.isNotBlank()) {
             playlistManager.createPlaylist(name)
             // Optionally add current track to the new playlist
-            playbackState.value.currentTrack?.id?.let { trackId ->
+            playbackState.value.currentTrack?.let { track ->
                 val newPlaylist = playlistManager.playlists.value.lastOrNull()
                 newPlaylist?.let {
-                    playlistManager.addToPlaylist(it.id, trackId)
+                    playlistManager.addToPlaylist(it.id, track)
                 }
             }
         }
@@ -412,8 +422,8 @@ class PlayerViewModel @Inject constructor(
     }
     
     fun addToPlaylist(playlistId: String) {
-        playbackState.value.currentTrack?.id?.let { trackId ->
-            playlistManager.addToPlaylist(playlistId, trackId)
+        playbackState.value.currentTrack?.let { track ->
+            playlistManager.addToPlaylist(playlistId, track)
         }
         _showPlaylistSheet.value = false
     }
@@ -431,10 +441,10 @@ class PlayerViewModel @Inject constructor(
         if (name.isNotBlank()) {
             playlistManager.createPlaylist(name, isFolder = true)
             // Add current track to the new folder
-            playbackState.value.currentTrack?.id?.let { trackId ->
+            playbackState.value.currentTrack?.let { track ->
                 val newFolder = playlistManager.playlists.value.lastOrNull()
                 newFolder?.let {
-                    playlistManager.addToPlaylist(it.id, trackId)
+                    playlistManager.addToPlaylist(it.id, track)
                 }
             }
         }

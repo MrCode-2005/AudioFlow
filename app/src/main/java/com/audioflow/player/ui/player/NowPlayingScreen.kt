@@ -733,69 +733,65 @@ fun NowPlayingScreen(
                         )
                     }
                     
-                    Spacer(modifier = Modifier.width(16.dp))
-                    
-                    // Download Button
-                    val downloadStatus by viewModel.downloadStatus.collectAsState()
-                    val context = LocalContext.current
-                    
-                    IconButton(onClick = {
-                        when (downloadStatus) {
-                            com.audioflow.player.data.local.entity.DownloadStatus.COMPLETED -> {
-                                // Already downloaded - show toast, don't delete automatically
-                                Toast.makeText(context, "Already downloaded", Toast.LENGTH_SHORT).show()
-                            }
-                            com.audioflow.player.data.local.entity.DownloadStatus.DOWNLOADING -> {
-                                // Cancel the download
-                                viewModel.downloadCurrentTrack() // toggleDownload will cancel it
-                                Toast.makeText(context, "Download cancelled", Toast.LENGTH_SHORT).show()
-                            }
-                            else -> {
-                                // Start download
-                                viewModel.downloadCurrentTrack()
-                                Toast.makeText(context, "Starting download...", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }) {
-                        when (downloadStatus) {
-                            com.audioflow.player.data.local.entity.DownloadStatus.DOWNLOADING -> {
-                                val infiniteTransition = rememberInfiniteTransition(label = "download")
-                                val angle by infiniteTransition.animateFloat(
-                                    initialValue = 0f,
-                                    targetValue = 360f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(2000, easing = LinearEasing)
-                                    ),
-                                    label = "rotation"
-                                )
-                                Icon(
-                                    imageVector = Icons.Default.Refresh, // Clockwise rotation effect
-                                    contentDescription = "Downloading - tap to cancel",
-                                    tint = SpotifyGreen,
-                                    modifier = Modifier.rotate(angle)
-                                )
-                            }
-                            com.audioflow.player.data.local.entity.DownloadStatus.COMPLETED -> {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Downloaded",
-                                    tint = Color.Red // Red checkmark for downloaded songs
-                                )
-                            }
-                            else -> {
-                                Icon(
-                                    imageVector = Icons.Default.Download,
-                                    contentDescription = "Download",
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
+                    Spacer(modifier = Modifier.weight(1f))
                     
                     Row {
-                        // Video toggle button (replaces unused QueueMusic icon)
-                        // Only visible for YouTube tracks per spec Section 1
+                        // Download Button
+                        val downloadStatus by viewModel.downloadStatus.collectAsState()
+                        val context = LocalContext.current
+                        
+                        IconButton(onClick = {
+                            when (downloadStatus) {
+                                com.audioflow.player.data.local.entity.DownloadStatus.COMPLETED -> {
+                                    Toast.makeText(context, "Already downloaded", Toast.LENGTH_SHORT).show()
+                                }
+                                com.audioflow.player.data.local.entity.DownloadStatus.DOWNLOADING -> {
+                                    viewModel.downloadCurrentTrack()
+                                    Toast.makeText(context, "Download cancelled", Toast.LENGTH_SHORT).show()
+                                }
+                                else -> {
+                                    viewModel.downloadCurrentTrack()
+                                    Toast.makeText(context, "Starting download...", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }) {
+                            when (downloadStatus) {
+                                com.audioflow.player.data.local.entity.DownloadStatus.DOWNLOADING -> {
+                                    val infiniteTransition = rememberInfiniteTransition(label = "download")
+                                    val angle by infiniteTransition.animateFloat(
+                                        initialValue = 0f,
+                                        targetValue = 360f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(2000, easing = LinearEasing)
+                                        ),
+                                        label = "rotation"
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Downloading",
+                                        tint = SpotifyGreen,
+                                        modifier = Modifier.rotate(angle)
+                                    )
+                                }
+                                com.audioflow.player.data.local.entity.DownloadStatus.COMPLETED -> {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Downloaded",
+                                        tint = Color.Red
+                                    )
+                                }
+                                else -> {
+                                    Icon(
+                                        imageVector = Icons.Default.Download,
+                                        contentDescription = "Download",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Video toggle button
                         if (track?.source == TrackSource.YOUTUBE) {
                             IconButton(onClick = { viewModel.toggleVideoMode() }) {
                                 if (isVideoLoading) {
@@ -847,7 +843,8 @@ fun NowPlayingScreen(
                     id = playlist.id,
                     name = playlist.name,
                     songCount = playlist.trackIds.size,
-                    thumbnailUri = playlist.thumbnailUri
+                    thumbnailUri = playlist.thumbnailUri,
+                    containsSong = track?.id?.let { playlist.trackIds.contains(it) } ?: false
                 )
             },
             onDismiss = { viewModel.dismissPlaylistSheet() },
