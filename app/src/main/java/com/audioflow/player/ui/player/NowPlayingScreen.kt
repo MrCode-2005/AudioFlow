@@ -151,7 +151,7 @@ fun NowPlayingScreen(
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
 
-        // Fullscreen video — ALL controls hidden per spec Section 5
+        // Fullscreen video with minimal controls (play/pause + timeline)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -164,7 +164,7 @@ fun NowPlayingScreen(
                 modifier = Modifier.fillMaxSize()
             )
             
-            // Small exit-fullscreen overlay button (top-left)
+            // Exit fullscreen button (top-left)
             IconButton(
                 onClick = {
                     activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -180,6 +180,76 @@ fun NowPlayingScreen(
                     tint = Color.White.copy(alpha = 0.7f),
                     modifier = Modifier.size(32.dp)
                 )
+            }
+            
+            // Bottom overlay: play/pause + progress timeline
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.6f),
+                                Color.Black.copy(alpha = 0.8f)
+                            )
+                        )
+                    )
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Progress bar with timestamps
+                var landscapeSlider by remember { mutableStateOf<Float?>(null) }
+                Slider(
+                    value = landscapeSlider ?: playbackState.progress,
+                    onValueChange = { landscapeSlider = it },
+                    onValueChangeFinished = {
+                        landscapeSlider?.let { viewModel.seekToProgress(it) }
+                        landscapeSlider = null
+                    },
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = Color.White,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = formatDuration(playbackState.currentPosition),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        text = formatDuration(playbackState.duration),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.7f)
+                    )
+                }
+                
+                // Play/Pause button
+                IconButton(
+                    onClick = { viewModel.togglePlayPause() },
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(Color.White.copy(alpha = 0.15f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                        tint = Color.White,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
         return
