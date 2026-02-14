@@ -155,7 +155,7 @@ class CreateViewModel @Inject constructor(
                 val playlist = playlistManager.createPlaylist(playlistName)
 
                 // Use batch add for fewer I/O operations and UI updates
-                playlistManager.addTracksToPlaylist(playlist.id, tracks.map { it.id })
+                playlistManager.addTracksToPlaylist(playlist.id, tracks)
 
                 Log.d(TAG, "Created playlist '${playlistName}' with ${tracks.size} songs")
                 
