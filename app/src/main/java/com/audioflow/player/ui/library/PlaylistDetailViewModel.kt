@@ -143,7 +143,9 @@ class PlaylistDetailViewModel @Inject constructor(
     
     // Add a track to this playlist
     fun addTrack(track: Track) {
-        playlistManager.addToPlaylist(playlistId, track.id)
-        loadPlaylist()
+        viewModelScope.launch {
+            playlistManager.addToPlaylist(playlistId, track)
+            loadPlaylist()
+        }
     }
 }

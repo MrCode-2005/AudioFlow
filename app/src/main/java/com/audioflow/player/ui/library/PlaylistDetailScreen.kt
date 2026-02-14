@@ -39,6 +39,7 @@ import coil.compose.AsyncImage
 import com.audioflow.player.model.Track
 import com.audioflow.player.ui.components.MiniPlayer
 import com.audioflow.player.ui.components.TrackListItem
+import com.audioflow.player.ui.components.AddSongsToSectionSheet
 import com.audioflow.player.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,6 +55,8 @@ fun PlaylistDetailScreen(
     
     // Download state for playlist (simplified for now)
     var isDownloaded by remember { mutableStateOf(false) }
+    var showAddSongsSheet by remember { mutableStateOf(false) }
+    var selectedTrackForOptions by remember { mutableStateOf<Track?>(null) }
     
     // Dialog states
     var showEditDialog by remember { mutableStateOf(false) }
@@ -182,7 +185,6 @@ fun PlaylistDetailScreen(
                             )
                         }
                         
-                        // Download Button
                         IconButton(onClick = { 
                             viewModel.downloadAll()
                             // Show toast/snackbar
@@ -190,6 +192,16 @@ fun PlaylistDetailScreen(
                             Icon(
                                 imageVector = Icons.Default.DownloadForOffline,
                                 contentDescription = "Download Playlist",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+
+                        // Add Songs Button
+                        IconButton(onClick = { showAddSongsSheet = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add Songs",
                                 tint = TextSecondary,
                                 modifier = Modifier.size(28.dp)
                             )
@@ -214,7 +226,7 @@ fun PlaylistDetailScreen(
                                     text = { Text("Add Songs") },
                                     onClick = { 
                                         showMenu = false 
-                                        // TODO: Navigate to Add Songs search
+                                        showAddSongsSheet = true
                                     },
                                     leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) }
                                 )
@@ -268,14 +280,15 @@ fun PlaylistDetailScreen(
                             onDeleteClick = { viewModel.deleteTrack(track) },
                             onMoveUpClick = { viewModel.moveTrackUp(track) },
                             onMoveDownClick = { viewModel.moveTrackDown(track) },
-                            onDownloadClick = { viewModel.downloadTrack(track) }
+                            onDownloadClick = { viewModel.downloadTrack(track) },
+                            onOptionsClick = { selectedTrackForOptions = track }
                         )
                     }
                 }
             }
         }
         
-        // Mini Player
+            // Mini Player
         AnimatedVisibility(
             visible = playbackState.currentTrack != null,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -290,64 +303,73 @@ fun PlaylistDetailScreen(
                 modifier = Modifier.padding(bottom = 0.dp)
             )
         }
+
+        // Add Songs Sheet
+        if (showAddSongsSheet) {
+             com.audioflow.player.ui.components.AddSongsToSectionSheet(
+                onDismiss = { showAddSongsSheet = false },
+                onAddTrack = { track ->
+                    viewModel.addTrack(track)
+                }
+            )
+        }
+
+        // Song Options Sheet
+        
+        if (selectedTrackForOptions != null) {
+            com.audioflow.player.ui.components.SongOptionsSheet(
+                isVisible = true,
+                track = selectedTrackForOptions,
+                onDismiss = { selectedTrackForOptions = null },
+                onPlay = {
+                    selectedTrackForOptions?.let { viewModel.playTrack(it) }
+                    selectedTrackForOptions = null
+                    onNavigateToPlayer()
+                },
+                onPlayNext = {
+                    // TODO: Implement play next
+                    selectedTrackForOptions = null
+                },
+                onAddToQueue = {
+                     // TODO: Implement add to queue
+                     selectedTrackForOptions = null
+                },
+                onAddToPlaylist = {
+                    // TODO: Show add to playlist sheet
+                    selectedTrackForOptions = null
+                },
+                onGoToArtist = { selectedTrackForOptions = null },
+                onGoToAlbum = { selectedTrackForOptions = null },
+                onShare = { selectedTrackForOptions = null },
+                showMoveOptions = true,
+                onMoveUp = {
+                    selectedTrackForOptions?.let { viewModel.moveTrackUp(it) }
+                    selectedTrackForOptions = null
+                },
+                onMoveDown = {
+                    selectedTrackForOptions?.let { viewModel.moveTrackDown(it) }
+                    selectedTrackForOptions = null
+                },
+                onMoveTo = {
+                     // TODO: Implement Move To
+                     selectedTrackForOptions = null
+                },
+                isDownloaded = false, // Check if downloaded
+                onDownload = {
+                    selectedTrackForOptions?.let { viewModel.downloadTrack(it) }
+                    selectedTrackForOptions = null
+                },
+                onDelete = {
+                    selectedTrackForOptions?.let { viewModel.deleteTrack(it) }
+                    selectedTrackForOptions = null
+                },
+                deleteLabel = "Remove from playlist"
+            )
+        }
     }
     
-    // Edit Playlist Dialog
-    if (showEditDialog) {
-        AlertDialog(
-            onDismissRequest = { showEditDialog = false },
-            title = { Text("Rename Playlist") },
-            text = {
-                TextField(
-                    value = editPlaylistName,
-                    onValueChange = { editPlaylistName = it },
-                    placeholder = { Text("Playlist name") },
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.renamePlaylist(editPlaylistName)
-                        showEditDialog = false
-                    }
-                ) {
-                    Text("Rename")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-    
-    // Delete Confirmation Dialog
-    if (showDeleteConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirmDialog = false },
-            title = { Text("Delete Playlist?") },
-            text = { Text("This will permanently delete \"${playlist?.name}\". This action cannot be undone.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.deletePlaylist()
-                        showDeleteConfirmDialog = false
-                        onNavigateBack()
-                    }
-                ) {
-                    Text("Delete", color = Color.Red)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirmDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-    }
+    // ... Dialogs ...
+}
 
 @Composable
 private fun PlaylistTrackItem(
@@ -357,10 +379,9 @@ private fun PlaylistTrackItem(
     onDeleteClick: () -> Unit,
     onMoveUpClick: () -> Unit,
     onMoveDownClick: () -> Unit,
-    onDownloadClick: () -> Unit
+    onDownloadClick: () -> Unit,
+    onOptionsClick: () -> Unit
 ) {
-    var showMenu by remember { mutableStateOf(false) }
-    
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -410,61 +431,12 @@ private fun PlaylistTrackItem(
             Spacer(modifier = Modifier.width(8.dp))
         }
         
-        Box {
-            IconButton(onClick = { showMenu = true }) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "More options",
-                    tint = TextSecondary
-                )
-            }
-            
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Move up") },
-                    onClick = {
-                        showMenu = false
-                        onMoveUpClick()
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.ArrowUpward, contentDescription = null)
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Move down") },
-                    onClick = {
-                        showMenu = false
-                        onMoveDownClick()
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.ArrowDownward, contentDescription = null)
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Download") },
-                    onClick = {
-                        showMenu = false
-                        onDownloadClick()
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.Download, contentDescription = null)
-                    }
-                )
-                Divider()
-                DropdownMenuItem(
-                    text = { Text("Remove from playlist", color = Color.Red) },
-                    onClick = {
-                        showMenu = false
-                        onDeleteClick()
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red)
-                    }
-                )
-            }
+        IconButton(onClick = onOptionsClick) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "More options",
+                tint = TextSecondary
+            )
         }
     }
 }
