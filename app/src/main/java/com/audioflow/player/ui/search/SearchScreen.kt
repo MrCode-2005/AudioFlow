@@ -58,9 +58,10 @@ fun SearchScreen(
         }
     }
     
-    // Auto-dismiss keyboard when results load
+    // Auto-dismiss keyboard when results load (with 3s delay)
     LaunchedEffect(uiState.shouldDismissKeyboard) {
         if (uiState.shouldDismissKeyboard) {
+            kotlinx.coroutines.delay(3000) // Wait 3 seconds before closing keyboard
             focusManager.clearFocus()
             viewModel.onKeyboardDismissed()
         }

@@ -91,6 +91,31 @@ class SearchViewModel @Inject constructor(
     private var searchJob: Job? = null
     private var prefetchJob: Job? = null
     
+    // Cache for resolved YouTube stream URLs (videoId -> streamUrl)
+    private val streamUrlCache = mutableMapOf<String, String>()
+    
+    init {
+        // Prefetch stream URLs for recently played songs
+        viewModelScope.launch {
+            recentlyPlayedSongs.collect { songs ->
+                songs.take(10).forEach { song ->
+                    if (song.id.startsWith("yt_")) {
+                        val videoId = song.id.removePrefix("yt_")
+                        if (!streamUrlCache.containsKey(videoId)) {
+                            launch {
+                                mediaRepository.getYouTubeStreamUrl(videoId)
+                                    .onSuccess { streamInfo ->
+                                        streamUrlCache[videoId] = streamInfo.audioStreamUrl
+                                        Log.d(TAG, "Prefetched recent song: ${song.title}")
+                                    }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     fun updateQuery(query: String) {
         // Update query text but DON'T clear results while typing
         _uiState.value = _uiState.value.copy(
@@ -121,10 +146,10 @@ class SearchViewModel @Inject constructor(
         // Show loading indicator but KEEP old results visible while typing
         _uiState.value = _uiState.value.copy(isSearching = true)
         
-        // PROPER DEBOUNCE: 600ms for YouTube (wait for user to finish typing)
+        // PROPER DEBOUNCE: 800ms for YouTube (wait for user to finish typing)
         // This prevents searching for "S", "St", "Sta", "Star" etc.
-        // Only fires search after user stops typing for 600ms
-        val debounceTime = if (_uiState.value.searchMode == SearchMode.YOUTUBE) 600L else 150L
+        // Only fires search after user stops typing for 800ms
+        val debounceTime = if (_uiState.value.searchMode == SearchMode.YOUTUBE) 800L else 300L
         searchJob = viewModelScope.launch {
             delay(debounceTime)
             performSearch(query)
@@ -303,6 +328,7 @@ class SearchViewModel @Inject constructor(
                         isSearching = false,
                         isYouTubeLoading = false,
                         hasResults = results.isNotEmpty(),
+                        // Don't dismiss keyboard immediately - let user decide or wait for timeout
                         shouldDismissKeyboard = true
                     )
                     
@@ -495,8 +521,37 @@ class SearchViewModel @Inject constructor(
                 playerController.setYouTubeQueue(filteredResults, clickedIndex)
             }
             
+            // Perform sequential extraction if not cached
+            if (streamUrlCache.containsKey(result.videoId)) {
+                val cachedUrl = streamUrlCache[result.videoId]!!
+                Log.d(TAG, "Playing search result from cache: ${result.title}")
+                val track = YouTubeSearchResult(
+                    videoId = result.videoId,
+                    title = result.title,
+                    artist = result.artist,
+                    thumbnailUrl = result.thumbnailUrl,
+                    duration = result.duration
+                ).let { 
+                    // Create minimal track with cached URL
+                    Track(
+                        id = "yt_${it.videoId}",
+                        title = it.title,
+                        artist = it.artist,
+                        album = "YouTube",
+                        duration = it.duration,
+                        artworkUri = Uri.parse(it.thumbnailUrl),
+                        contentUri = Uri.parse(cachedUrl),
+                        source = com.audioflow.player.model.TrackSource.YOUTUBE
+                    )
+                }
+                playerController.play(track)
+                _uiState.value = _uiState.value.copy(isExtractingStream = false)
+                return@launch
+            }
+
             mediaRepository.getYouTubeStreamUrl(result.videoId)
                 .onSuccess { streamInfo ->
+                    streamUrlCache[result.videoId] = streamInfo.audioStreamUrl // Cache it!
                     val track = mediaRepository.createTrackFromYouTube(streamInfo)
                     playerController.play(track)
                     _uiState.value = _uiState.value.copy(isExtractingStream = false)
@@ -591,10 +646,23 @@ class SearchViewModel @Inject constructor(
         
         // Use existing play logic which handles queue management
         if (track.source == com.audioflow.player.model.TrackSource.YOUTUBE) {
+            val videoId = track.id.removePrefix("yt_")
+            
+            // CHECK CACHE FIRST: If we have the URL, play instantly
+            if (streamUrlCache.containsKey(videoId)) {
+                val cachedUrl = streamUrlCache[videoId]!!
+                Log.d(TAG, "Playing recent song from cache: ${track.title}")
+                val cachedTrack = track.copy(contentUri = Uri.parse(cachedUrl))
+                playSound(cachedTrack)
+                return
+            }
+            
             viewModelScope.launch {
                  // Trigger extraction since the URL we constructed above is likely not a direct stream
-                 mediaRepository.getYouTubeStreamUrl(track.id.removePrefix("yt_"))
+                 mediaRepository.getYouTubeStreamUrl(videoId)
                     .onSuccess { streamInfo ->
+                        // Cache for next time
+                        streamUrlCache[videoId] = streamInfo.audioStreamUrl
                         val playableTrack = mediaRepository.createTrackFromYouTube(streamInfo)
                         playSound(playableTrack)
                     }
