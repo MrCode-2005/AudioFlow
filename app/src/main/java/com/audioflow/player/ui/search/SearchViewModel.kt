@@ -608,6 +608,10 @@ class SearchViewModel @Inject constructor(
         playerController.next()
     }
     
+    fun playPrevious() {
+        playerController.previous()
+    }
+    
     fun clearError() {
         _uiState.value = _uiState.value.copy(youtubeError = null)
     }

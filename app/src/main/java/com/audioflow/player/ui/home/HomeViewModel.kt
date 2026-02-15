@@ -373,6 +373,10 @@ class HomeViewModel @Inject constructor(
         playerController.next()
     }
     
+    fun playPrevious() {
+        playerController.previous()
+    }
+    
     fun toggleContentMode() {
         _uiState.value = _uiState.value.copy(
             isDynamicMode = !_uiState.value.isDynamicMode

@@ -26,6 +26,7 @@ import com.audioflow.player.ui.theme.*
 @Composable
 fun MiniPlayer(
     playbackState: PlaybackState,
+    onPreviousClick: () -> Unit,
     onPlayPauseClick: () -> Unit,
     onNextClick: () -> Unit,
     onClick: () -> Unit,
@@ -93,7 +94,16 @@ fun MiniPlayer(
                 )
             }
             
-            // Controls
+            // Controls: Previous, Play/Pause, Next
+            IconButton(onClick = onPreviousClick) {
+                Icon(
+                    imageVector = Icons.Default.SkipPrevious,
+                    contentDescription = "Previous",
+                    tint = TextPrimary,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            
             IconButton(onClick = onPlayPauseClick) {
                 Icon(
                     imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,

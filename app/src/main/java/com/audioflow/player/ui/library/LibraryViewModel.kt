@@ -132,6 +132,10 @@ class LibraryViewModel @Inject constructor(
         playerController.next()
     }
     
+    fun playPrevious() {
+        playerController.previous()
+    }
+    
     fun playNextInQueue(track: Track) {
         playerController.addNext(track)
     }

@@ -141,6 +141,10 @@ class PlaylistDetailViewModel @Inject constructor(
         playerController.next()
     }
     
+    fun playPrevious() {
+        playerController.previous()
+    }
+    
     // Add a track to this playlist
     fun addTrack(track: Track) {
         viewModelScope.launch {

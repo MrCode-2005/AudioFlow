@@ -278,6 +278,7 @@ fun SearchScreen(
         ) {
             MiniPlayer(
                 playbackState = playbackState,
+                onPreviousClick = { viewModel.playPrevious() },
                 onPlayPauseClick = { viewModel.togglePlayPause() },
                 onNextClick = { viewModel.playNext() },
                 onClick = onNavigateToPlayer,
