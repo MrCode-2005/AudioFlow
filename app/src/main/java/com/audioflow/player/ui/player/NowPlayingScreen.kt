@@ -3,6 +3,10 @@ package com.audioflow.player.ui.player
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.view.WindowInsets
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -148,6 +152,17 @@ fun NowPlayingScreen(
 
     // ===================== LANDSCAPE FULLSCREEN VIDEO =====================
     if (isVideoMode && isLandscape && videoStreamInfo != null) {
+        // Immersive fullscreen: hide system bars
+        DisposableEffect(Unit) {
+            val window = (activity as? Activity)?.window ?: return@DisposableEffect onDispose {}
+            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+            insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
+            onDispose {
+                insetsController.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+
         // Back button exits fullscreen (returns to portrait), not closing the player
         androidx.activity.compose.BackHandler {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -192,22 +207,6 @@ fun NowPlayingScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Exit fullscreen button (top-left)
-                    IconButton(
-                        onClick = {
-                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        },
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(16.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FullscreenExit,
-                            contentDescription = "Exit fullscreen",
-                            tint = Color.White.copy(alpha = 0.85f),
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
                     
                     // Center play/pause button (large, YouTube-style)
                     IconButton(
@@ -1005,7 +1004,7 @@ fun VideoPlayerView(
                 useController = false
                 setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                 // Center-crop: fill entire screen, may crop edges but no letterboxing
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             }
         },
         modifier = modifier
