@@ -371,9 +371,17 @@ class PlayerController @Inject constructor(
                     Player.REPEAT_MODE_ALL -> RepeatMode.ALL
                     else -> RepeatMode.OFF
                 },
-                // Use full YouTube queue tracks for carousel display (shows prev/next album art)
-                queue = if (youTubeQueueTracks.isNotEmpty()) youTubeQueueTracks else currentQueue,
-                currentQueueIndex = if (youTubeQueueTracks.isNotEmpty()) youTubeQueueIndex.coerceAtLeast(0) else currentIndex
+                // Priority: playlistQueue > youTubeQueueTracks > currentQueue for carousel artwork
+                queue = when {
+                    playlistQueue.isNotEmpty() -> playlistQueue
+                    youTubeQueueTracks.isNotEmpty() -> youTubeQueueTracks
+                    else -> currentQueue
+                },
+                currentQueueIndex = when {
+                    playlistQueue.isNotEmpty() -> playlistQueueIndex.coerceAtLeast(0)
+                    youTubeQueueTracks.isNotEmpty() -> youTubeQueueIndex.coerceAtLeast(0)
+                    else -> currentIndex
+                }
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error updating playback state: ${e.message}")
