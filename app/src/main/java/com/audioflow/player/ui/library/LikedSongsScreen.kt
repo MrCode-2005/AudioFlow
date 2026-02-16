@@ -270,6 +270,10 @@ fun LikedSongsScreen(
                     // viewModel.toggleLike(selectedTrackForOptions)
                     selectedTrackForOptions = null
                 },
+                onSaveToDevice = {
+                    selectedTrackForOptions?.let { viewModel.saveTrackToDevice(it) }
+                    selectedTrackForOptions = null
+                },
                 deleteLabel = "Remove from Liked Songs"
             )
         }

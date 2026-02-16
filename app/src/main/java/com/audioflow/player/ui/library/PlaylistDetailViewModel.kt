@@ -22,6 +22,7 @@ class PlaylistDetailViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val playerController: PlayerController,
     private val downloadRepository: com.audioflow.player.data.repository.DownloadRepository,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -117,6 +118,28 @@ class PlaylistDetailViewModel @Inject constructor(
     fun downloadTrack(track: Track) {
         viewModelScope.launch {
             downloadRepository.startDownload(track)
+        }
+    }
+    
+    // Save track to device's public "Songs \uD83C\uDFB6" folder
+    fun saveTrackToDevice(track: Track) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val result = downloadRepository.saveToDevice(track)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (result.isSuccess) {
+                    android.widget.Toast.makeText(
+                        appContext,
+                        "Saved to Songs \uD83C\uDFB6 folder",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    android.widget.Toast.makeText(
+                        appContext,
+                        "Save failed: ${result.exceptionOrNull()?.message}",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
     }
     

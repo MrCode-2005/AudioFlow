@@ -364,6 +364,10 @@ fun PlaylistDetailScreen(
                     selectedTrackForOptions?.let { viewModel.deleteTrack(it) }
                     selectedTrackForOptions = null
                 },
+                onSaveToDevice = {
+                    selectedTrackForOptions?.let { viewModel.saveTrackToDevice(it) }
+                    selectedTrackForOptions = null
+                },
                 deleteLabel = "Remove from playlist"
             )
         }

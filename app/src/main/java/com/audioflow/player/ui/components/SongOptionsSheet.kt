@@ -48,6 +48,8 @@ fun SongOptionsSheet(
     onDownload: (() -> Unit)? = null,
     onRemoveDownload: (() -> Unit)? = null,
     onRetry: (() -> Unit)? = null,
+    // Save to device (public storage)
+    onSaveToDevice: (() -> Unit)? = null,
     // Delete action (from playlist or liked)
     onDelete: (() -> Unit)? = null,
     deleteLabel: String = "Remove"
@@ -213,6 +215,15 @@ fun SongOptionsSheet(
                             onClick = onDownload
                         )
                     }
+                }
+                
+                // Save to device (public storage folder)
+                if (onSaveToDevice != null) {
+                    OptionItem(
+                        icon = Icons.Default.PhoneAndroid,
+                        text = "Save to device",
+                        onClick = onSaveToDevice
+                    )
                 }
                 
                 // Navigation actions

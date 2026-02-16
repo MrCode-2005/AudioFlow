@@ -672,6 +672,11 @@ fun DownloadsScreen(
                     selectedTrackForOptions = null
                     selectedEntityForOptions = null
                 },
+                onSaveToDevice = {
+                    viewModel.saveTrackToDevice(entityToTrack(entity))
+                    selectedTrackForOptions = null
+                    selectedEntityForOptions = null
+                },
                 deleteLabel = "Delete"
             )
         }
@@ -715,40 +720,50 @@ fun DownloadsScreen(
             )
         }
         
-        // Drag Overlay
+        // Drag Overlay - using Popup so it renders above everything
         if (isDragging && draggedItem != null) {
             val item = draggedItem!!
-            Box(
-                modifier = Modifier
-                    .offset { IntOffset((dragPosition.x + dragChange.x).roundToInt(), (dragPosition.y + dragChange.y).roundToInt()) }
-                    .width(280.dp)
-                    .background(Color(0xFF282828), RoundedCornerShape(8.dp))
-                    .border(1.dp, SpotifyGreen, RoundedCornerShape(8.dp))
-                    .padding(8.dp)
+            androidx.compose.ui.window.Popup(
+                offset = IntOffset(
+                    (dragPosition.x + dragChange.x).roundToInt(),
+                    (dragPosition.y + dragChange.y).roundToInt()
+                )
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AsyncImage(
-                        model = item.thumbnailUrl,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(4.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = item.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                Box(
+                    modifier = Modifier
+                        .width(280.dp)
+                        .background(Color(0xFF282828), RoundedCornerShape(8.dp))
+                        .border(
+                            width = 2.dp,
+                            color = if (currentDropTargetId != null) SpotifyGreen else SpotifyGreen.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(8.dp)
                         )
-                        Text(
-                            text = if (currentDropTargetId != null) "Drop to move" else "Move to folder",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = SpotifyGreen
+                        .padding(8.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(
+                            model = item.thumbnailUrl,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            contentScale = ContentScale.Crop
                         )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = item.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (currentDropTargetId != null) "✓ Drop to move" else "Drag to folder",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (currentDropTargetId != null) SpotifyGreen else TextSecondary
+                            )
+                        }
                     }
                 }
             }

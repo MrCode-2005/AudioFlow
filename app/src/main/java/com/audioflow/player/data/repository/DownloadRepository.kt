@@ -15,6 +15,8 @@ import com.audioflow.player.service.DownloadWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import android.os.Environment
+import android.util.Log
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,7 +24,8 @@ import javax.inject.Singleton
 class DownloadRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val downloadedSongDao: DownloadedSongDao,
-    private val downloadFolderDao: com.audioflow.player.data.local.dao.DownloadFolderDao
+    private val downloadFolderDao: com.audioflow.player.data.local.dao.DownloadFolderDao,
+    private val mediaRepository: MediaRepository
 ) {
     val allDownloads: Flow<List<DownloadedSongEntity>> = downloadedSongDao.getAllDownloadedSongs()
     val allFolders: Flow<List<com.audioflow.player.data.local.entity.DownloadFolderEntity>> = downloadFolderDao.getAllFolders()
@@ -236,5 +239,93 @@ class DownloadRepository @Inject constructor(
     suspend fun getSongCountInFolder(folderId: String): Int {
         return downloadedSongDao.getSongCountInFolder(folderId)
     }
+    
+    // ========== Save to Device (Public Storage) ==========
+    
+    /**
+     * Save a track's audio file to the public "Songs 🎶" folder on internal storage.
+     * For YouTube tracks: extracts audio URL and downloads.
+     * For local tracks: copies the file from content URI.
+     */
+    suspend fun saveToDevice(track: Track): Result<String> {
+        return try {
+            val songsDir = java.io.File(
+                Environment.getExternalStorageDirectory(),
+                "Songs \uD83C\uDFB6"
+            )
+            if (!songsDir.exists()) songsDir.mkdirs()
+            
+            val safeTitle = track.title.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            val artist = (track.artist ?: "Unknown").replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            
+            if (track.id.startsWith("yt_")) {
+                // YouTube track — extract and download audio
+                val videoId = track.id.removePrefix("yt_")
+                val streamInfo = mediaRepository.getYouTubeStreamUrl(videoId).getOrElse { error ->
+                    throw Exception("Could not get audio URL: ${error.message}")
+                }
+                
+                val downloadUrl = streamInfo.audioStreamUrl
+                if (downloadUrl.isBlank()) throw Exception("Empty audio URL")
+                
+                val fileName = "$safeTitle - $artist.m4a"
+                val outFile = java.io.File(songsDir, fileName)
+                
+                // Download with OkHttp using same UA as extraction
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                
+                val request = okhttp3.Request.Builder()
+                    .url(downloadUrl)
+                    .header("User-Agent", "com.google.android.youtube/19.09.36 (Linux; U; Android 14) gzip")
+                    .build()
+                
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) throw Exception("Download failed: HTTP ${response.code}")
+                
+                response.body?.byteStream()?.use { input ->
+                    java.io.FileOutputStream(outFile).use { output ->
+                        input.copyTo(output, bufferSize = 8192)
+                    }
+                } ?: throw Exception("Empty response body")
+                
+                // Notify media scanner
+                android.media.MediaScannerConnection.scanFile(
+                    context, arrayOf(outFile.absolutePath), null, null
+                )
+                
+                Log.d("DownloadRepo", "Saved to device: ${outFile.absolutePath} (${outFile.length() / 1024} KB)")
+                Result.success(outFile.absolutePath)
+                
+            } else {
+                // Local track — copy from content URI
+                val contentUri = track.contentUri
+                if (contentUri == android.net.Uri.EMPTY) {
+                    throw Exception("No content URI available")
+                }
+                
+                val fileName = "$safeTitle - $artist.mp3"
+                val outFile = java.io.File(songsDir, fileName)
+                
+                context.contentResolver.openInputStream(contentUri)?.use { input ->
+                    java.io.FileOutputStream(outFile).use { output ->
+                        input.copyTo(output, bufferSize = 8192)
+                    }
+                } ?: throw Exception("Could not open audio file")
+                
+                // Notify media scanner
+                android.media.MediaScannerConnection.scanFile(
+                    context, arrayOf(outFile.absolutePath), null, null
+                )
+                
+                Log.d("DownloadRepo", "Saved to device: ${outFile.absolutePath} (${outFile.length() / 1024} KB)")
+                Result.success(outFile.absolutePath)
+            }
+        } catch (e: Exception) {
+            Log.e("DownloadRepo", "Save to device failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
 }
-
