@@ -422,11 +422,14 @@ class PlayerController @Inject constructor(
             }
             return
         }
-        
         setQueueInternal(tracks, startIndex)
     }
     
     private fun setQueueInternal(tracks: List<Track>, startIndex: Int) {
+        // Clear playlist & YouTube queues so stale artwork/navigation doesn't persist
+        clearPlaylistQueue()
+        clearYouTubeQueue()
+        
         currentQueue = tracks
         
         // Save the starting track to recently played
