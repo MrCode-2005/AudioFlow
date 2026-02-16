@@ -29,8 +29,10 @@ fun PlayerOptionsSheet(
     isVisible: Boolean,
     track: Track?,
     lyricsEnabled: Boolean,
+    videoZoomEnabled: Boolean = true,
     onDismiss: () -> Unit,
     onLyricsToggle: () -> Unit,
+    onVideoZoomToggle: () -> Unit = {},
     onAddToPlaylist: () -> Unit,
     onGoToArtist: () -> Unit,
     onGoToAlbum: () -> Unit,
@@ -117,6 +119,16 @@ fun PlayerOptionsSheet(
                 showToggle = true,
                 isEnabled = lyricsEnabled,
                 onClick = onLyricsToggle
+            )
+            
+            // Video Zoom toggle
+            OptionsSheetItem(
+                icon = Icons.Default.ZoomOutMap,
+                title = "Video Zoom",
+                subtitle = if (videoZoomEnabled) "On" else "Off",
+                showToggle = true,
+                isEnabled = videoZoomEnabled,
+                onClick = onVideoZoomToggle
             )
             
             // Add to playlist

@@ -19,7 +19,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class LikedSongsManager @Inject constructor(
-    private val likedSongDao: LikedSongDao
+    private val likedSongDao: LikedSongDao,
+    private val trackMetadataManager: TrackMetadataManager
 ) {
     private val scope = CoroutineScope(Dispatchers.IO) // Use IO dispatcher for DB ops
 
@@ -46,6 +47,8 @@ class LikedSongsManager @Inject constructor(
      * Add a song to liked songs
      */
     fun likeSong(track: Track) {
+        // Save full track metadata for later resolution (needed for playback)
+        trackMetadataManager.saveTrack(track)
         scope.launch {
             val entity = LikedSongEntity(
                 id = track.id,

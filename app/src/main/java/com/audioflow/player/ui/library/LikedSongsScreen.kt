@@ -187,21 +187,14 @@ fun LikedSongsScreen(
                 contentPadding = PaddingValues(bottom = 100.dp)
             ) {
                 items(likedSongs) { entity ->
-                    val track = Track(
-                        id = entity.id,
-                        title = entity.title,
-                        artist = entity.artist ?: "Unknown",
-                        album = entity.album ?: "Unknown",
-                        artworkUri = android.net.Uri.parse(entity.thumbnailUrl ?: ""),
-                        duration = entity.duration,
-                        source = com.audioflow.player.model.TrackSource.LOCAL,
-                        contentUri = android.net.Uri.EMPTY
-                    )
+                    val track = viewModel.likedEntityToTrack(entity)
                     
                     TrackListItem(
                         track = track,
                         onClick = { 
-                            viewModel.playTrack(track)
+                            // Play with full liked songs queue for carousel support
+                            val index = likedSongs.indexOf(entity)
+                            viewModel.playLikedSongAtIndex(likedSongs, index)
                             onNavigateToPlayer()
                         },
                         onDeleteClick = { /* Remove from liked? */ },

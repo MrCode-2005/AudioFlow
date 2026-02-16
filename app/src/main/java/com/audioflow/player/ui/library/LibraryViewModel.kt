@@ -39,6 +39,7 @@ class LibraryViewModel @Inject constructor(
     private val playlistManager: com.audioflow.player.data.local.PlaylistManager,
     private val likedSongsManager: com.audioflow.player.data.local.LikedSongsManager,
     private val downloadRepository: com.audioflow.player.data.repository.DownloadRepository,
+    private val trackMetadataManager: com.audioflow.player.data.local.TrackMetadataManager,
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     
@@ -298,6 +299,12 @@ class LibraryViewModel @Inject constructor(
         playerController.setQueue(finalTracks, 0)
     }
     
+    fun playLikedSongAtIndex(songs: List<LikedSongEntity>, index: Int) {
+        if (songs.isEmpty() || index < 0) return
+        val tracks = songs.map { likedEntityToTrack(it) }
+        playerController.setQueue(tracks, index)
+    }
+    
     fun downloadLikedSongs(songs: List<LikedSongEntity>) {
         songs.forEach { entity ->
             val track = likedEntityToTrack(entity)
@@ -305,7 +312,33 @@ class LibraryViewModel @Inject constructor(
         }
     }
     
-    private fun likedEntityToTrack(entity: LikedSongEntity): Track {
+    internal fun likedEntityToTrack(entity: LikedSongEntity): Track {
+        // Try to resolve full track from TrackMetadataManager first (has contentUri)
+        trackMetadataManager.getTrack(entity.id)?.let { return it }
+        
+        // Try to find in local media repository tracks
+        val localTrack = _uiState.value.tracks.find { it.id == entity.id }
+        if (localTrack != null) return localTrack
+        
+        // Fallback: construct content URI from ID for local tracks
+        // Local track IDs are numeric MediaStore IDs
+        val contentUri = try {
+            val numericId = entity.id.toLong()
+            android.content.ContentUris.withAppendedId(
+                android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                numericId
+            )
+        } catch (e: NumberFormatException) {
+            // YouTube track ID (not numeric) — use empty URI, will be resolved at playback
+            android.net.Uri.EMPTY
+        }
+        
+        val source = if (entity.id.startsWith("yt_")) {
+            com.audioflow.player.model.TrackSource.YOUTUBE
+        } else {
+            com.audioflow.player.model.TrackSource.LOCAL
+        }
+        
         return Track(
             id = entity.id,
             title = entity.title,
@@ -313,10 +346,8 @@ class LibraryViewModel @Inject constructor(
             album = entity.album ?: "Unknown",
             duration = entity.duration,
             artworkUri = android.net.Uri.parse(entity.thumbnailUrl ?: ""),
-            contentUri = android.net.Uri.EMPTY,
-            source = com.audioflow.player.model.TrackSource.LOCAL // Or YOUTUBE?
-            // Liked songs can be from anywhere. We assume LOCAL metadata for display usually.
-            // If they are YouTube, they might have youtube specific IDs.
+            contentUri = contentUri,
+            source = source
         )
     }
 }

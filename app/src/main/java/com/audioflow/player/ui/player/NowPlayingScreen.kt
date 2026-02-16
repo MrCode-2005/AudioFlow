@@ -78,6 +78,7 @@ fun NowPlayingScreen(
     val lyrics by viewModel.lyrics.collectAsState()
     val showOptionsSheet by viewModel.showOptionsSheet.collectAsState()
     val lyricsEnabled by viewModel.lyricsEnabled.collectAsState()
+    val videoZoomEnabled by viewModel.videoZoomEnabled.collectAsState()
     val track = playbackState.currentTrack
     
     // Video state
@@ -196,6 +197,7 @@ fun NowPlayingScreen(
                 videoUrl = videoStreamInfo!!.videoStreamUrl,
                 currentPosition = playbackState.currentPosition,
                 isPlaying = playbackState.isPlaying,
+                useZoomMode = videoZoomEnabled,
                 modifier = Modifier.fillMaxSize()
             )
             
@@ -341,6 +343,7 @@ fun NowPlayingScreen(
                 videoUrl = videoStreamInfo!!.videoStreamUrl,
                 currentPosition = playbackState.currentPosition,
                 isPlaying = playbackState.isPlaying,
+                useZoomMode = videoZoomEnabled,
                 modifier = Modifier.fillMaxSize()
             )
             
@@ -847,9 +850,9 @@ fun NowPlayingScreen(
                 )
             },
             onDismiss = { viewModel.dismissPlaylistSheet() },
-            onLikedSongsClick = { viewModel.onLikeButtonClick() },
+            onLikedSongsClick = { viewModel.toggleLikedSong() },
             onNewFolderClick = { viewModel.createNewFolder() },
-            onPlaylistClick = { viewModel.addToPlaylist(it.id) },
+            onPlaylistClick = { viewModel.togglePlaylistSong(it.id) },
             onNewPlaylistClick = { viewModel.showCreatePlaylistDialog() },
             onRemoveFromLikedSongs = { viewModel.removeFromLikedSongs() }
         )
@@ -922,8 +925,10 @@ fun NowPlayingScreen(
             isVisible = showOptionsSheet,
             track = track,
             lyricsEnabled = lyricsEnabled,
+            videoZoomEnabled = videoZoomEnabled,
             onDismiss = { viewModel.dismissOptionsSheet() },
             onLyricsToggle = { viewModel.toggleLyrics() },
+            onVideoZoomToggle = { viewModel.toggleVideoZoom() },
             onAddToPlaylist = { 
                 viewModel.dismissOptionsSheet()
                 viewModel.onLikeButtonClick() // This will show the playlist sheet
@@ -955,6 +960,7 @@ fun VideoPlayerView(
     videoUrl: String,
     currentPosition: Long,
     isPlaying: Boolean,
+    useZoomMode: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1004,7 +1010,7 @@ fun VideoPlayerView(
                 useController = false
                 setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                 // Center-crop: fill entire screen, may crop edges but no letterboxing
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                resizeMode = if (useZoomMode) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
             }
         },
         modifier = modifier

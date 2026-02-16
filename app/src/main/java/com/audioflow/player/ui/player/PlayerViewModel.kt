@@ -42,6 +42,7 @@ class PlayerViewModel @Inject constructor(
         private const val TAG = "PlayerViewModel"
         private const val PREFS_NAME = "player_prefs"
         private const val KEY_LYRICS_ENABLED = "lyrics_enabled"
+        private const val KEY_VIDEO_ZOOM = "video_zoom_enabled"
     }
     
     // Preferences
@@ -85,6 +86,10 @@ class PlayerViewModel @Inject constructor(
     // Lyrics visibility preference (persisted)
     private val _lyricsEnabled = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_ENABLED, true))
     val lyricsEnabled: StateFlow<Boolean> = _lyricsEnabled.asStateFlow()
+    
+    // Video zoom preference (persisted) - default true = ZOOM (cropped), false = FIT (full video)
+    private val _videoZoomEnabled = MutableStateFlow(prefs.getBoolean(KEY_VIDEO_ZOOM, true))
+    val videoZoomEnabled: StateFlow<Boolean> = _videoZoomEnabled.asStateFlow()
     
     // ==================== VIDEO STATE ====================
     private val _isVideoMode = MutableStateFlow(false)
@@ -286,20 +291,21 @@ class PlayerViewModel @Inject constructor(
     }
     
     /**
-     * Handle like button click (3-state cycle)
-     * Click 1: Not liked -> Liked (add to liked songs)
-     * Click 2: Liked -> Show sheet
-     * Click 3+: Sheet actions handle the rest
+     * Handle like/plus button click - always opens the playlist sheet
      */
     fun onLikeButtonClick() {
+        _showPlaylistSheet.value = true
+    }
+    
+    /**
+     * Toggle liked state without dismissing the sheet
+     */
+    fun toggleLikedSong() {
         val track = playbackState.value.currentTrack ?: return
-        
-        if (!likedSongsManager.isLiked(track.id)) {
-            // First click: Add to liked songs
-            likedSongsManager.likeSong(track)
+        if (likedSongsManager.isLiked(track.id)) {
+            likedSongsManager.unlikeSong(track.id)
         } else {
-            // Second click: Show bottom sheet
-            _showPlaylistSheet.value = true
+            likedSongsManager.likeSong(track)
         }
     }
     
@@ -358,6 +364,12 @@ class PlayerViewModel @Inject constructor(
         val newState = !_lyricsEnabled.value
         _lyricsEnabled.value = newState
         prefs.edit().putBoolean(KEY_LYRICS_ENABLED, newState).apply()
+    }
+    
+    fun toggleVideoZoom() {
+        val newState = !_videoZoomEnabled.value
+        _videoZoomEnabled.value = newState
+        prefs.edit().putBoolean(KEY_VIDEO_ZOOM, newState).apply()
     }
     
     // Go to Artist - triggers search for artist name
@@ -421,11 +433,14 @@ class PlayerViewModel @Inject constructor(
         _showPlaylistSheet.value = false
     }
     
-    fun addToPlaylist(playlistId: String) {
-        playbackState.value.currentTrack?.let { track ->
+    fun togglePlaylistSong(playlistId: String) {
+        val track = playbackState.value.currentTrack ?: return
+        if (playlistManager.isTrackInPlaylist(playlistId, track.id)) {
+            playlistManager.removeFromPlaylist(playlistId, track.id)
+        } else {
             playlistManager.addToPlaylist(playlistId, track)
         }
-        _showPlaylistSheet.value = false
+        // Keep sheet open so user can see the state change
     }
     
     fun createNewFolder() {
