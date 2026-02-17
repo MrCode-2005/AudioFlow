@@ -306,6 +306,97 @@ class YouTubeMusicApi @Inject constructor() {
         }
     }
 
+    /**
+     * Search YouTube Music for songs by query (used for genres, playlists, etc.)
+     * Uses the InnerTube /search endpoint with music-specific filters.
+     */
+    suspend fun searchSongs(query: String, maxResults: Int = 15): Result<List<TrendingTrack>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val requestBody = JSONObject().apply {
+                    put("context", JSONObject().apply {
+                        put("client", JSONObject().apply {
+                            put("clientName", "WEB_REMIX")
+                            put("clientVersion", "1.20241023.01.00")
+                            put("hl", "en")
+                            put("gl", "IN")
+                            put("platform", "DESKTOP")
+                        })
+                    })
+                    put("query", query)
+                    put("params", "EgWKAQIIAWoOEAMQBBAJEAoQBRAREBU%3D") // Filter: Songs only
+                }
+
+                val request = Request.Builder()
+                    .url("$BASE_URL/search?key=$API_KEY&prettyPrint=false")
+                    .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
+                    .header("User-Agent", "com.google.android.youtube/19.09.36 (Linux; U; Android 14) gzip")
+                    .header("Content-Type", "application/json")
+                    .header("Origin", "https://music.youtube.com")
+                    .header("Referer", "https://music.youtube.com/")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception("YouTube Music search failed: HTTP ${response.code}")
+                    )
+                }
+
+                val body = response.body?.string()
+                    ?: return@withContext Result.failure(Exception("Empty response body"))
+
+                val tracks = parseSearchResponse(body, maxResults)
+                Log.d(TAG, "YouTube Music search '$query' returned ${tracks.size} songs")
+                Result.success(tracks)
+            } catch (e: Exception) {
+                Log.e(TAG, "YouTube Music search failed for '$query': ${e.message}", e)
+                Result.failure(e)
+            }
+        }
+
+    /**
+     * Parse InnerTube search response.
+     */
+    private fun parseSearchResponse(responseBody: String, maxResults: Int): List<TrendingTrack> {
+        val tracks = mutableListOf<TrendingTrack>()
+        try {
+            val json = JSONObject(responseBody)
+            
+            // Navigate: contents → tabbedSearchResultsRenderer → tabs → tabRenderer → content
+            val contents = json
+                .optJSONObject("contents")
+                ?.optJSONObject("tabbedSearchResultsRenderer")
+                ?.optJSONArray("tabs")
+                ?.optJSONObject(0)
+                ?.optJSONObject("tabRenderer")
+                ?.optJSONObject("content")
+                ?.optJSONObject("sectionListRenderer")
+                ?.optJSONArray("contents")
+            
+            if (contents != null) {
+                for (i in 0 until contents.length()) {
+                    val section = contents.optJSONObject(i) ?: continue
+                    val shelfContents = section
+                        .optJSONObject("musicShelfRenderer")
+                        ?.optJSONArray("contents")
+                        ?: continue
+                    
+                    extractTracksFromItems(shelfContents, tracks)
+                    if (tracks.size >= maxResults) break
+                }
+            }
+            
+            // If structured parsing failed, try recursive fallback
+            if (tracks.isEmpty()) {
+                findTracksRecursive(JSONObject(responseBody), tracks, maxResults)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing search response: ${e.message}", e)
+        }
+        return tracks.take(maxResults)
+    }
+
     // ==================== HELPER METHODS ====================
 
     private fun extractVideoId(renderer: JSONObject): String? {

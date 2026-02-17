@@ -79,6 +79,22 @@ class TrendingRepository @Inject constructor(
             && (System.currentTimeMillis() - cacheTimestamp) < CACHE_DURATION_MS
     }
 
+    /**
+     * Search YouTube Music for songs by query (genres, playlists, etc.)
+     */
+    suspend fun searchSongs(query: String, maxResults: Int = 15): Result<List<TrendingTrack>> {
+        return youtubeMusicApi.searchSongs(query, maxResults)
+    }
+
+    /**
+     * Search YouTube Music and return results as YouTubeSearchResult for playback compatibility.
+     */
+    suspend fun searchSongsAsYTResults(query: String, maxResults: Int = 15): Result<List<YouTubeSearchResult>> {
+        return searchSongs(query, maxResults).map { tracks ->
+            toYouTubeSearchResults(tracks)
+        }
+    }
+
     // ==================== CONVERSION UTILITIES ====================
 
     /**

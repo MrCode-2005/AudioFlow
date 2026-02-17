@@ -144,6 +144,12 @@ class HomeViewModel @Inject constructor(
         // Use real YouTube Music chart data via InnerTube API
         trendingRepository.getTrendingSongs("IN")
             .onSuccess { tracks ->
+                if (tracks.isEmpty()) {
+                    // InnerTube returned success but 0 tracks parsed — use fallback
+                    Log.w("HomeViewModel", "InnerTube returned 0 tracks, using fallback")
+                    loadTrendingSongsFallback()
+                    return@onSuccess
+                }
                 // Convert to YouTubeSearchResult for playback compatibility
                 val searchResults = trendingRepository.toYouTubeSearchResults(tracks)
                 _uiState.value = _uiState.value.copy(
@@ -191,6 +197,10 @@ class HomeViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isTrendingLoading = true)
             trendingRepository.refresh("IN")
                 .onSuccess { tracks ->
+                    if (tracks.isEmpty()) {
+                        loadTrendingSongsFallback()
+                        return@onSuccess
+                    }
                     val searchResults = trendingRepository.toYouTubeSearchResults(tracks)
                     _uiState.value = _uiState.value.copy(
                         trendingTracks = tracks.take(20),
@@ -199,7 +209,7 @@ class HomeViewModel @Inject constructor(
                     )
                 }
                 .onFailure {
-                    _uiState.value = _uiState.value.copy(isTrendingLoading = false)
+                    loadTrendingSongsFallback()
                 }
         }
     }
@@ -219,6 +229,27 @@ class HomeViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(genreCategories = updatedCategories)
         
         viewModelScope.launch {
+            // Try YouTube Music InnerTube search first
+            trendingRepository.searchSongsAsYTResults(category.query, maxResults = 8)
+                .onSuccess { results ->
+                    if (results.isNotEmpty()) {
+                        val categories = _uiState.value.genreCategories.toMutableList()
+                        categories[index] = category.copy(
+                            songs = results.take(8),
+                            isLoading = false
+                        )
+                        _uiState.value = _uiState.value.copy(genreCategories = categories)
+                        Log.d("HomeViewModel", "Loaded ${results.size} songs for ${category.name} via InnerTube")
+                        return@launch
+                    }
+                    // Empty results — fall through to fallback
+                    Log.w("HomeViewModel", "InnerTube empty for ${category.name}, using fallback")
+                }
+                .onFailure { error ->
+                    Log.w("HomeViewModel", "InnerTube failed for ${category.name}: ${error.message}, using fallback")
+                }
+            
+            // Fallback: regular YouTube search
             val suffix = filterPreferences.getFilterSuffix()
             val augQuery = if (suffix.isNotBlank()) "${category.query} $suffix" else category.query
             mediaRepository.searchYouTube(augQuery)
@@ -229,7 +260,7 @@ class HomeViewModel @Inject constructor(
                         isLoading = false
                     )
                     _uiState.value = _uiState.value.copy(genreCategories = categories)
-                    Log.d("HomeViewModel", "Loaded ${results.size} songs for ${category.name}")
+                    Log.d("HomeViewModel", "Fallback: loaded ${results.size} songs for ${category.name}")
                 }
                 .onFailure { error ->
                     val categories = _uiState.value.genreCategories.toMutableList()
@@ -258,18 +289,34 @@ class HomeViewModel @Inject constructor(
         val deferredResults = playlistConfigs.map { (id, name, desc) ->
             viewModelScope.async {
                 val query = when (id) {
-                    "today_hits" -> "top hits 2024 popular songs -mix -compilation -hour"
-                    "chill_vibes" -> "chill lofi relaxing music -mix -compilation -hour"
-                    "workout" -> "workout gym motivation music -mix -compilation -hour"
-                    "party" -> "party dance music 2024 -mix -compilation -hour"
-                    else -> "popular music 2024 -mix -compilation"
+                    "today_hits" -> "top hits popular songs"
+                    "chill_vibes" -> "chill lofi relaxing music"
+                    "workout" -> "workout gym motivation music"
+                    "party" -> "party dance music"
+                    else -> "popular music"
                 }
                 
-                val augQuery = if (filterPreferences.getFilterSuffix().isNotBlank()) "$query ${filterPreferences.getFilterSuffix()}" else query
+                // Try YouTube Music InnerTube search first
+                val innerTubeResult = trendingRepository.searchSongsAsYTResults(query, maxResults = 15)
+                if (innerTubeResult.isSuccess) {
+                    val results = innerTubeResult.getOrDefault(emptyList())
+                    if (results.isNotEmpty()) {
+                        val coverUrl = results.firstOrNull()?.thumbnailUrl ?: ""
+                        return@async TrendingPlaylist(
+                            id = id,
+                            name = name,
+                            description = desc,
+                            songs = results.take(15),
+                            coverImageUrl = coverUrl
+                        )
+                    }
+                }
+                
+                // Fallback: regular YouTube search
+                val augQuery = "$query -mix -compilation -hour"
                 mediaRepository.searchYouTube(augQuery)
                     .fold(
                         onSuccess = { results ->
-                            // Filter out long videos + use first song's thumbnail as playlist cover
                             val filteredResults = results.filter { it.duration in 30_000..600_000 }
                             val coverUrl = filteredResults.firstOrNull()?.thumbnailUrl ?: ""
                             TrendingPlaylist(
