@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.audioflow.player.data.local.RecentlyPlayedSong
+import com.audioflow.player.data.remote.TrendingTrack
 import com.audioflow.player.data.remote.YouTubeSearchResult
 import com.audioflow.player.model.Track
 import com.audioflow.player.ui.components.*
@@ -140,10 +141,35 @@ fun HomeScreen(
             
             // ==================== DISCOVER MODE: Recommendations ====================
             if (uiState.isDynamicMode) {
-                // Trending Now Section
+                // Trending Now Section — uses real YouTube Music chart data
                 if (uiState.trendingSongs.isNotEmpty() || uiState.isTrendingLoading) {
                     item {
-                        SectionHeader(title = "🔥 Trending Now")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🔥 Trending Now",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            // Refresh button
+                            IconButton(
+                                onClick = { viewModel.refreshTrending() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     }
                     
                     item {
@@ -151,12 +177,32 @@ fun HomeScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(180.dp),
+                                    .height(200.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CircularProgressIndicator(color = SpotifyGreen)
                             }
+                        } else if (uiState.trendingTracks.isNotEmpty()) {
+                            // Real chart data with ranked cards
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(uiState.trendingTracks) { track ->
+                                    RankedTrendingCard(
+                                        track = track,
+                                        onClick = {
+                                            val ytResult = uiState.trendingSongs.find { it.videoId == track.videoId }
+                                            if (ytResult != null) {
+                                                viewModel.playYouTubeResult(ytResult, uiState.trendingSongs)
+                                                onNavigateToPlayer()
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         } else {
+                            // Fallback: search-based trending (no chart positions)
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -488,6 +534,104 @@ private fun TrendingSongCard(
         
         Text(
             text = song.artist,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/**
+ * Premium ranked trending card showing chart position.
+ * Features a bold rank number overlaid on the artwork.
+ */
+@Composable
+private fun RankedTrendingCard(
+    track: TrendingTrack,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(150.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .size(150.dp)
+                .clip(RoundedCornerShape(12.dp))
+        ) {
+            // Album art
+            AsyncImage(
+                model = track.thumbnailUrl,
+                contentDescription = track.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            
+            // Gradient overlay for rank visibility
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.7f)
+                            ),
+                            startY = 100f
+                        )
+                    )
+            )
+            
+            // Chart rank number (bold, bottom-left)
+            Text(
+                text = "#${track.chartPosition}",
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(10.dp),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Black,
+                color = Color.White,
+                fontSize = 28.sp
+            )
+            
+            // Trending fire badge (top-right)
+            if (track.chartPosition <= 5) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .background(
+                            color = SpotifyGreen,
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "🔥 HOT",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
+                    )
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = track.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextPrimary,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        
+        Text(
+            text = track.artist,
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary,
             maxLines = 1,

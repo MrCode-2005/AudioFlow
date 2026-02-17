@@ -5,8 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.audioflow.player.data.local.RecentlyPlayedManager
 import com.audioflow.player.data.local.RecentlyPlayedSong
+import com.audioflow.player.data.remote.TrendingTrack
 import com.audioflow.player.data.remote.YouTubeSearchResult
 import com.audioflow.player.data.repository.MediaRepository
+import com.audioflow.player.data.repository.TrendingRepository
 import com.audioflow.player.model.Album
 import com.audioflow.player.model.Track
 import com.audioflow.player.service.PlayerController
@@ -53,6 +55,7 @@ data class HomeUiState(
     
     // Recommendations
     val trendingSongs: List<YouTubeSearchResult> = emptyList(),
+    val trendingTracks: List<TrendingTrack> = emptyList(),  // Real chart data
     val isTrendingLoading: Boolean = false,
     val genreCategories: List<GenreCategory> = emptyList(),
     val trendingPlaylists: List<TrendingPlaylist> = emptyList(),
@@ -64,6 +67,7 @@ class HomeViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val playerController: PlayerController,
     private val recentlyPlayedManager: RecentlyPlayedManager,
+    private val trendingRepository: TrendingRepository,
     val filterPreferences: com.audioflow.player.data.local.FilterPreferences
 ) : ViewModel() {
     
@@ -137,23 +141,67 @@ class HomeViewModel @Inject constructor(
     }
     
     private suspend fun loadTrendingSongs() {
+        // Use real YouTube Music chart data via InnerTube API
+        trendingRepository.getTrendingSongs("IN")
+            .onSuccess { tracks ->
+                // Convert to YouTubeSearchResult for playback compatibility
+                val searchResults = trendingRepository.toYouTubeSearchResults(tracks)
+                _uiState.value = _uiState.value.copy(
+                    trendingTracks = tracks.take(20),
+                    trendingSongs = searchResults.take(20),
+                    isTrendingLoading = false
+                )
+                Log.d("HomeViewModel", "Loaded ${tracks.size} trending songs from YouTube Music charts")
+            }
+            .onFailure { error ->
+                Log.e("HomeViewModel", "Chart fetch failed, falling back to search: ${error.message}")
+                // Fallback: use YouTube search if InnerTube fails
+                loadTrendingSongsFallback()
+            }
+    }
+
+    /**
+     * Fallback: load trending via YouTube search if InnerTube API fails.
+     */
+    private suspend fun loadTrendingSongsFallback() {
         val suffix = filterPreferences.getFilterSuffix()
         val baseQuery = "trending songs 2024 -mix -compilation -hour"
         val query = if (suffix.isNotBlank()) "$baseQuery $suffix" else baseQuery
         mediaRepository.searchYouTube(query)
             .onSuccess { results ->
-                // Filter out long videos (mixes/compilations) — keep only 1-10 min songs
                 val filteredResults = results.filter { it.duration in 30_000..600_000 }
                 _uiState.value = _uiState.value.copy(
                     trendingSongs = filteredResults.take(10),
+                    trendingTracks = emptyList(),  // No chart positions available
                     isTrendingLoading = false
                 )
-                Log.d("HomeViewModel", "Loaded ${filteredResults.size} trending songs (filtered from ${results.size})")
+                Log.d("HomeViewModel", "Fallback: loaded ${filteredResults.size} trending songs via search")
             }
             .onFailure { error ->
-                Log.e("HomeViewModel", "Failed to load trending: ${error.message}")
+                Log.e("HomeViewModel", "Fallback trending also failed: ${error.message}")
                 _uiState.value = _uiState.value.copy(isTrendingLoading = false)
             }
+    }
+
+    /**
+     * Force refresh trending data (invalidates cache).
+     */
+    fun refreshTrending() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isTrendingLoading = true)
+            trendingRepository.refresh("IN")
+                .onSuccess { tracks ->
+                    val searchResults = trendingRepository.toYouTubeSearchResults(tracks)
+                    _uiState.value = _uiState.value.copy(
+                        trendingTracks = tracks.take(20),
+                        trendingSongs = searchResults.take(20),
+                        isTrendingLoading = false
+                    )
+                }
+                .onFailure {
+                    _uiState.value = _uiState.value.copy(isTrendingLoading = false)
+                }
+        }
     }
     
     /**
