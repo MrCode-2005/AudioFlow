@@ -244,17 +244,12 @@ class DownloadRepository @Inject constructor(
     
     /**
      * Save a track's audio file to the public "Songs 🎶" folder on internal storage.
+     * Uses MediaStore API for Android 10+ (scoped storage compatible).
      * For YouTube tracks: extracts audio URL and downloads.
      * For local tracks: copies the file from content URI.
      */
     suspend fun saveToDevice(track: Track): Result<String> {
         return try {
-            val songsDir = java.io.File(
-                Environment.getExternalStorageDirectory(),
-                "Songs \uD83C\uDFB6"
-            )
-            if (!songsDir.exists()) songsDir.mkdirs()
-            
             val safeTitle = track.title.replace(Regex("[\\\\/:*?\"<>|]"), "_")
             val artist = (track.artist ?: "Unknown").replace(Regex("[\\\\/:*?\"<>|]"), "_")
             
@@ -269,7 +264,6 @@ class DownloadRepository @Inject constructor(
                 if (downloadUrl.isBlank()) throw Exception("Empty audio URL")
                 
                 val fileName = "$safeTitle - $artist.m4a"
-                val outFile = java.io.File(songsDir, fileName)
                 
                 // Download with OkHttp using same UA as extraction
                 val client = okhttp3.OkHttpClient.Builder()
@@ -285,19 +279,12 @@ class DownloadRepository @Inject constructor(
                 val response = client.newCall(request).execute()
                 if (!response.isSuccessful) throw Exception("Download failed: HTTP ${response.code}")
                 
-                response.body?.byteStream()?.use { input ->
-                    java.io.FileOutputStream(outFile).use { output ->
-                        input.copyTo(output, bufferSize = 8192)
-                    }
-                } ?: throw Exception("Empty response body")
+                val inputStream = response.body?.byteStream() ?: throw Exception("Empty response body")
                 
-                // Notify media scanner
-                android.media.MediaScannerConnection.scanFile(
-                    context, arrayOf(outFile.absolutePath), null, null
-                )
+                val savedPath = writeToPublicStorage(fileName, "audio/mp4", inputStream)
                 
-                Log.d("DownloadRepo", "Saved to device: ${outFile.absolutePath} (${outFile.length() / 1024} KB)")
-                Result.success(outFile.absolutePath)
+                Log.d("DownloadRepo", "Saved to device: $savedPath")
+                Result.success(savedPath)
                 
             } else {
                 // Local track — copy from content URI
@@ -307,25 +294,85 @@ class DownloadRepository @Inject constructor(
                 }
                 
                 val fileName = "$safeTitle - $artist.mp3"
-                val outFile = java.io.File(songsDir, fileName)
                 
-                context.contentResolver.openInputStream(contentUri)?.use { input ->
-                    java.io.FileOutputStream(outFile).use { output ->
-                        input.copyTo(output, bufferSize = 8192)
-                    }
-                } ?: throw Exception("Could not open audio file")
+                val inputStream = context.contentResolver.openInputStream(contentUri)
+                    ?: throw Exception("Could not open audio file")
                 
-                // Notify media scanner
-                android.media.MediaScannerConnection.scanFile(
-                    context, arrayOf(outFile.absolutePath), null, null
-                )
+                val savedPath = writeToPublicStorage(fileName, "audio/mpeg", inputStream)
                 
-                Log.d("DownloadRepo", "Saved to device: ${outFile.absolutePath} (${outFile.length() / 1024} KB)")
-                Result.success(outFile.absolutePath)
+                Log.d("DownloadRepo", "Saved to device: $savedPath")
+                Result.success(savedPath)
             }
         } catch (e: Exception) {
             Log.e("DownloadRepo", "Save to device failed: ${e.message}", e)
             Result.failure(e)
+        }
+    }
+    
+    /**
+     * Write an input stream to the public "Songs 🎶" folder using MediaStore API.
+     * Compatible with Android 10+ scoped storage.
+     */
+    private fun writeToPublicStorage(
+        fileName: String,
+        mimeType: String,
+        inputStream: java.io.InputStream
+    ): String {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            // Android 10+ — use MediaStore API
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+                put(android.provider.MediaStore.Audio.Media.MIME_TYPE, mimeType)
+                put(android.provider.MediaStore.Audio.Media.RELATIVE_PATH, "Songs \uD83C\uDFB6")
+                put(android.provider.MediaStore.Audio.Media.IS_PENDING, 1)
+            }
+            
+            val collection = android.provider.MediaStore.Audio.Media.getContentUri(
+                android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY
+            )
+            
+            val uri = context.contentResolver.insert(collection, contentValues)
+                ?: throw Exception("Failed to create MediaStore entry")
+            
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    inputStream.use { input ->
+                        input.copyTo(outputStream, bufferSize = 8192)
+                    }
+                } ?: throw Exception("Failed to open output stream")
+                
+                // Mark as complete (not pending anymore)
+                contentValues.clear()
+                contentValues.put(android.provider.MediaStore.Audio.Media.IS_PENDING, 0)
+                context.contentResolver.update(uri, contentValues, null, null)
+                
+                return "Songs \uD83C\uDFB6/$fileName"
+            } catch (e: Exception) {
+                // Clean up on failure
+                context.contentResolver.delete(uri, null, null)
+                throw e
+            }
+        } else {
+            // Android 9 and below — direct file I/O
+            val songsDir = java.io.File(
+                Environment.getExternalStorageDirectory(),
+                "Songs \uD83C\uDFB6"
+            )
+            if (!songsDir.exists()) songsDir.mkdirs()
+            
+            val outFile = java.io.File(songsDir, fileName)
+            inputStream.use { input ->
+                java.io.FileOutputStream(outFile).use { output ->
+                    input.copyTo(output, bufferSize = 8192)
+                }
+            }
+            
+            // Notify media scanner
+            android.media.MediaScannerConnection.scanFile(
+                context, arrayOf(outFile.absolutePath), null, null
+            )
+            
+            return outFile.absolutePath
         }
     }
 }
